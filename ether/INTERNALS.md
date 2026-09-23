@@ -90,9 +90,17 @@ could learn; `welcome` already carries a seed for it.
 
 For each other station, for each of its slots: it must be placed and above its
 modem's sensitivity, it must not be transmitting itself, the slot must have last
-said `RX` or `CAD`, and its stated `freq`, `bw`, `sf` and `sync` must equal the
-transmission's. That last list is one constant — the thing to extend when the
+said `RX` or `CAD`, its stated `bw`, `sf` and `sync` must equal the
+transmission's, and its `freq` must be within a quarter of its bandwidth of
+the transmission's. That list is one constant — the thing to extend when the
 medium learns to care about coding rate, header type or preamble length.
+
+The carrier is matched within a tolerance, not exactly, because the
+synthesizer steps in 32 MHz / 2^25: two drivers asked for 869.525 MHz round it
+to register values tens of hertz apart (RadioLib lands on 869 524 963 Hz, the
+berlinmesh driver on 869 524 999), and an exact match makes two stations on
+one channel deaf to each other. A quarter of the bandwidth is what a LoRa
+demodulator tolerates. Two frames interfere on the same terms.
 
 A slot in `CAD` is sensing, not receiving. It must be told a frame is
 arriving, or a channel activity detection is blind to every frame that starts

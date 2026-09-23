@@ -46,7 +46,9 @@ the level above the floor.
 
 A frame is heard by a station within that range whose radio last said it was
 **receiving** on the same **carrier, bandwidth, spreading factor and sync
-word**. A station whose radio last said it was in **CAD** (channel activity
+word** — the carrier within a quarter of the bandwidth, which is what a LoRa
+demodulator tolerates and what lets two drivers that round one frequency
+differently hear each other. A station whose radio last said it was in **CAD** (channel activity
 detection) on that carrier is told the frame is arriving and nothing more:
 it is sensing energy, so it gets an `rx_begin` marked `"cad": true` and no
 `rx_end`, and no reception is recorded for it.

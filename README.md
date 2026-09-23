@@ -207,6 +207,12 @@ nodes:
   sergey: { id: 2, kind: berlinmesh, pos: [52.3740, 4.9030] }
 ```
 
+`testbed/scenarios/mixed.yaml` is such a scenario: three `reticulous`
+stations 1 km apart in a line with transport on, a `berlinmesh` station 50 m
+beyond each end, and 80 dB between those two. Ours are set to his sync word
+(`lora 0 sync 0x12`) and preamble (`lora 0 preamble 18`), without which the
+ether delivers nothing between the two kinds.
+
 Every kind takes `elf:` (the binary), `env:` (extra environment) and
 `setup:`; `type:` picks the class and defaults to the kind's name, so two
 builds of one firmware can be two kinds of one type. `reticulous` also takes

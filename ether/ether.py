@@ -44,7 +44,22 @@ import sys
 from datetime import datetime, timezone
 
 # What a receiver's state must share with a frame for the frame to be heard.
-MATCH_KEYS = ("freq", "bw", "sf", "sync")
+MATCH_KEYS = ("bw", "sf", "sync")
+
+# ...and how far apart two carriers may be and still be one carrier, as a
+# fraction of the bandwidth. The synthesizer steps in 32 MHz / 2^25, so two
+# drivers asked for the same frequency round it to register values tens of
+# hertz apart; an exact match would make them deaf to each other, which no
+# receiver is. A LoRa demodulator tolerates an offset of a quarter of its
+# bandwidth, and that is the figure here.
+CARRIER_TOLERANCE = 0.25
+
+
+def same_carrier(freq_a, freq_b, bw_hz):
+    """True when two stated frequencies are one carrier at this bandwidth."""
+    if freq_a is None or freq_b is None:
+        return freq_a == freq_b
+    return abs(freq_a - freq_b) <= CARRIER_TOLERANCE * float(bw_hz or 125_000)
 
 DEFAULT_EXPONENT = 2.7      # suburban; 2 is free space
 DEFAULT_NOISE_FIGURE_DB = 6
@@ -209,7 +224,7 @@ class Frame:
 
     def overlaps(self, other):
         """True when the two frames share the carrier and any instant of air."""
-        return (self.freq == other.freq
+        return (same_carrier(self.freq, other.freq, max(self.bw or 0, other.bw or 0))
                 and self.start_us < other.end_us
                 and other.start_us < self.end_us)
 
@@ -485,7 +500,8 @@ class Ether(asyncio.DatagramProtocol):
     @staticmethod
     def matches(state, tx):
         """True when a receiver's stated radio can hear this transmission."""
-        return all(state.get(k) == tx.get(k) for k in MATCH_KEYS)
+        return (all(state.get(k) == tx.get(k) for k in MATCH_KEYS)
+                and same_carrier(state.get("freq"), tx.get("freq"), state.get("bw")))
 
     # ---- delivery -------------------------------------------------------
 

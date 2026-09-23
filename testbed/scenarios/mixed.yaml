@@ -1,0 +1,33 @@
+origin: [52.374, 4.8897]
+physics: { exponent: 2.7, noise_figure_db: 6, capture_db: 6 }
+kinds:
+  reticulous:
+    elf: "../../../reticulous/esp-idf/build.linux/reticulous.elf"
+    fixed: "../../../reticulous/esp-idf/build.linux/data_merged"
+  berlinmesh:
+    elf: "../../../sergey/reticulum/fw/simesh/target/release/simesh"
+    tools: { rncfg: "../../../sergey/reticulum/target/release/rncfg" }
+    setup:
+      - "set --freq-hz 869525000 --sf 8 --bw-hz 125000 --cr 5 --txpower-dbm 14"
+      - "name set {name}"
+setup:
+  - "hostname {name}"
+  - "auth passwd admin admin"
+  - "lxmf create {name}"
+  - "set s.rnsd.transport_enabled 1"
+  - "lora up"
+  - "lora 0 freq 869.525"
+  - "lora 0 sf 8"
+  - "lora 0 bw 125"
+  - "lora 0 cr 5"
+  - "lora 0 txp 14"
+  - "lora 0 sync 0x12"
+  - "lora 0 preamble 18"
+nodes:
+  alpha: { id: 1, pos: [52.374, 4.8897] }
+  bravo: { id: 2, pos: [52.374, 4.904435] }
+  charlie: { id: 3, pos: [52.374, 4.91917] }
+  sergey1: { id: 4, kind: berlinmesh, pos: [52.374, 4.888963] }
+  sergey2: { id: 5, kind: berlinmesh, pos: [52.374, 4.919907] }
+obstructions:
+  - { between: [sergey1, sergey2], db: 80 }

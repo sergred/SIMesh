@@ -362,6 +362,22 @@ def test_wrong_sync_word_is_not_heard(ether):
     receiver.expect_nothing()
 
 
+def test_a_carrier_a_few_register_steps_off_is_the_same_carrier(ether):
+    """Two drivers round one frequency to registers tens of hertz apart; a
+    receiver hears within a quarter of its bandwidth and not beyond."""
+    sender, near_miss, other = ether(1, 0), ether(2, NEAR_M), ether(3, NEAR_M, 50)
+    for station in (sender, near_miss, other):
+        station.hello()
+    near_miss.state("RX", freq=FREQ + 36)
+    other.state("RX", freq=FREQ + BW // 4 + 1000)
+    time.sleep(0.1)
+
+    sender.tx(13)
+    near_miss.expect("rx_begin")
+    assert near_miss.expect("rx_end")["verdict"] == "clean"
+    other.expect_nothing()
+
+
 def test_overlapping_frames_both_end_as_crc(ether):
     """Two transmitters the same distance away: neither leads by the margin."""
     first, second, receiver = ether(1, -FAR_M), ether(2, FAR_M), ether(3, 0)
