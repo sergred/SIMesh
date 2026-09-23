@@ -6,23 +6,25 @@ lives; this is the reasoning underneath.
 
 ## The idea in one paragraph
 
-A station is the whole firmware, compiled for ESP-IDF's Linux host target and
-run as an ordinary process. The cut between the real code and the simulated
-part is the **SPI bus**: everything above it — the LoRa driver, its carrier
-sense and airtime accounting, Reticulum, LXMF, the web UI — is the same source
-that runs on a board, and what sits below it is a model of an SX1262 that
-hands its transmissions to a medium instead of to an antenna.
+A station is a whole firmware, compiled for Linux and run as an ordinary
+process. The cut between the real code and the simulated part is the **SPI
+bus**: everything above it — the LoRa driver, its carrier sense and airtime
+accounting, the Reticulum stack above that — is the same source that runs on a
+board, and what sits below it is a model of an SX1262 that hands its
+transmissions to a medium instead of to an antenna. Two firmwares meet on one
+medium this way, each above its own driver:
 
 ```
-Reticulum / LXMF / web UI          the same code as on a board
-        │
-   iface-lora                      the same driver, the same IRQ handling
-        │  RadioLibHal
-   VirtualHal ── GPIO shim         in place of the SPI bus and the pins
-        │
-   VirtualSx126x                   the chip: commands, registers, frame timing
-        │  UDP, JSON
-    the ether                      who hears what, and when
+reticulous (ESP-IDF host target)            berlinmesh (Rust, std)
+Reticulum / LXMF / web UI                   Node, LoRaIface
+        │                                           │
+   iface-lora, RadioLib                        Sx1262Radio
+        │  RadioLibHal                              │  embedded-hal
+   VirtualHal ── GPIO shim                     simesh-hal
+        │                                           │
+        └──────────── the chip model (radio/, or its copy in iface-lora)
+                            │  UDP, JSON
+                        the ether                   who hears what, and when
 ```
 
 ## Why a host port and not an emulator
@@ -143,6 +145,9 @@ about being a thing you did rather than a state you restored.
 
 ## Why the store is flushed before anything is taken away
 
+What follows is the `reticulous` kind's; a kind whose store writes through
+(`berlinmesh`) has nothing to flush, and its `flush` does nothing.
+
 `s.storage.flash_delay` is 60 seconds by default: a write sits in RAM for up to
 a minute before the store commits. On a board that is a power-cut window and
 entirely fair. Here it would make two things lie.
@@ -239,15 +244,49 @@ the second one to start finds the port taken.
 ## Status, and what `up` means
 
 `stopped` → `starting` → `setup` → `up`, with `restarting` for the gap after an
-exit nobody asked for. `up` is **the station answering on its TCP CLI**, not
-the process existing: a firmware process that has forked but not finished
-booting is not a station you can do anything with, and the map should not
-claim otherwise.
+exit nobody asked for. `up` is **the station answering the door its kind
+talks through** — a `reticulous` station's TCP CLI, a `berlinmesh` station's
+`rncfg detect` — not the process existing: a firmware process that has forked
+but not finished booting is not a station you can do anything with, and the
+map should not claim otherwise.
 
 `transport` is not status and is not read from the scenario. simd asks each
-running station for `s.rnsd.transport_enabled` every few seconds, because the
-setting is live and a person can flip it in that station's own web UI — the
-map should show what the station thinks, not what the scenario last said.
+running station every few seconds, through its kind, because the setting is
+live and a person can flip it on the station itself — the map should show
+what the station thinks, not what the scenario last said. A kind that cannot
+be asked shows it as unknown.
+
+## Kinds, and the rules that come with more than one firmware
+
+Everything the testbed knows about one firmware lives in its kind
+(`testbed/kinds/`); simd, the supervisor and the page know only the kind's
+methods. The station contract ([STATION.md](STATION.md)) is what every kind
+shares, and it is small on purpose: an identity, a directory, an address and
+the ether, in `SIMESH_*`, and a console on stdin/stdout.
+
+**A kind supplies what its firmware reads.** A firmware that reads other
+names for the contract's values gets them from its kind's `env`, beside the
+contract's own; the contract does not grow to fit one firmware.
+
+**A shared line is in one dialect.** The scenario's `setup:` goes to nodes of
+the first kind only, and **Run command** goes to one kind at a time. The same
+text typed at another firmware means something else or nothing, and a testbed
+that sent it anyway would be reporting an answer to a question it never asked.
+
+**Whether a station is set up is the kind's to say, and it is sampled at the
+fork.** Each firmware leaves its own mark in `state/` on a first boot, moments
+after it starts; the answer the setup step needs is the one from before it
+ran. Get it wrong one way and the lines run on every restart, the other way
+and they never run.
+
+**One conversation at a time on a station's door.** `rncfg` opens the
+station's KISS pty per command; two at once interleave their frames and both
+read garbage, so the `berlinmesh` kind holds a lock per station around every
+invocation, the transport poll included.
+
+**Ids are unique across kinds.** The ether keys stations by id; two processes
+answering under one id are one station to the medium, and two sockets on one
+address. The scenario refuses a file that repeats one.
 
 ## The page
 
@@ -272,7 +311,7 @@ Frames arrive as `tx` and `rx` and are drawn on the **browser's** clock: the
 ether's microseconds are its own, and the only thing in a `tx` that means
 anything here is how long the frame occupies the air.
 
-## What a station has instead of hardware
+## What a reticulous station has instead of hardware
 
 | | On a board | Here |
 |---|---|---|
@@ -290,6 +329,9 @@ websocket. Keystrokes go as binary frames and the terminal size as a JSON text
 frame, so no byte a person can type is special to the transport.
 
 ## The one rule that makes interrupts real
+
+This one is the reticulous firmware's, whose driver waits on DIO1; a driver
+that polls the IRQ register over the bus never meets it.
 
 The GPIO shim ([`hw-linux`](../hw-linux/README.md)) is a pin table, and the
 whole reason it exists is a single behaviour:
@@ -399,9 +441,10 @@ each other inside one message, and the ether rebases every frame onto its own
 clock before scheduling. The offsets within a frame are the transmitter's and
 travel unchanged, because the offsets are what a receiver actually needs.
 
-## The rules a host-only file obeys
+## The rules a host-only file obeys on ESP-IDF's host target
 
-Five, and they are not negotiable — each one is a way this port breaks.
+Five, for the reticulous firmware and for `radio/backend/esp-idf`, and they
+are not negotiable — each one is a way this port breaks.
 
 **No FreeRTOS task blocks in a host system call.** The port only knows a task
 is blocked when it blocked on a FreeRTOS primitive; a task sitting in `recv`

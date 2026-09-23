@@ -37,9 +37,9 @@ sys.path.insert(0, SIM_DIR)
 sys.path.insert(0, os.path.join(SIM_DIR, "..", "ether"))
 
 import ether as ether_module       # noqa: E402 - the paths are set just above
+import kinds as kinds_module       # noqa: E402
 import proxy                       # noqa: E402
 import scenario as scenario_module  # noqa: E402
-import setup as setup_module       # noqa: E402
 import stations as stations_module  # noqa: E402
 import webrtc as webrtc_module   # noqa: E402
 
@@ -47,11 +47,9 @@ DEFAULT_ELF = os.path.join(WORKSPACE, "reticulous", "esp-idf", "build.linux", "r
 DEFAULT_FIXED = os.path.join(WORKSPACE, "reticulous", "esp-idf", "build.linux", "data_merged")
 UI_DIST = os.path.join(SIM_DIR, "ui", "dist", "spa")
 
-TRANSPORT_KEY = "s.rnsd.transport_enabled"
 TRANSPORT_POLL_S = 6.0      # how often a station is asked whether it forwards
-SETUP_TIMEOUT_S = 90.0      # how long a fresh station has to answer its CLI
+SETUP_TIMEOUT_S = 90.0      # how long a fresh station has to say it is up
 SHUTDOWN_TIMEOUT_S = 5.0    # how long a connection may hold up a stop
-FLUSH_TIMEOUT_S = 8.0       # how long a station gets to commit its store
 SETTLE_S = 15.0             # how long a first boot gets to finish landing what setup asked for
 WEBRTC_PORT = 4433          # the station's own DataChannel port (s.net.webrtc_port)
 SIGNAL_PATH = "/webrtc"     # the one station route simd keeps for itself
@@ -68,8 +66,7 @@ class Simd:
 
     def __init__(self, args):
         self.args = args
-        self.elf = args.elf
-        self.fixed = args.fixed
+        self.kinds = {}                     # the loaded scenario's, name -> Kind
         self.ether_addr = args.ether
         self.ether = None
         self.ether_transport = None
@@ -123,9 +120,16 @@ class Simd:
         node = self.node_for_label(label)
         if node is None:
             return None
+        kind = self.kinds.get(node.get("kind"))
+        port = kind.web_port() if kind else None
+        if port is None:
+            return proxy.Refusal(
+                "404 Not Found",
+                "%s is a %s station, which has no web UI.\n"
+                % (self.name_of(node["id"]) or label, node.get("kind")))
         if path.split("?", 1)[0] == SIGNAL_PATH:
             return ("127.0.0.1", self.control_port)
-        return (stations_module.bind_addr(node["id"]), proxy.STATION_PORT)
+        return (stations_module.bind_addr(node["id"]), port)
 
     # ---- the medium ------------------------------------------------------
 
@@ -189,7 +193,7 @@ class Simd:
         node = self.scenario.node(name)
         return stations_module.Station(
             name, node["id"], self.scenario.node_dir(name),
-            self.elf, self.fixed, self.ether_addr,
+            self.kinds[node["kind"]], self.ether_addr,
             on_status=self.station_status, on_output=self.station_output)
 
     def station_status(self, station, status):
@@ -208,7 +212,7 @@ class Simd:
             pass
 
     async def after_start(self, station):
-        """Wait for a station's CLI, and set it up if it has never been set up.
+        """Wait for a station to be up, and set it up if it has never been.
 
         A station with state is left alone: its state is the scenario's, and
         re-running the lines would be re-answering questions it has already
@@ -216,14 +220,14 @@ class Simd:
         map, and it should be a working station rather than a dot waiting for
         someone to type.
         """
-        if not await setup_module.wait_until_up(station.node_id, SETUP_TIMEOUT_S):
-            log("station %s never answered its CLI" % station.name)
+        if not await station.kind.wait_up(station, SETUP_TIMEOUT_S):
+            log("station %s never came up (%s)" % (station.name, station.kind.name))
             return
         if not station.was_configured:
             station.set_status(stations_module.SETUP)
             try:
                 await self.send_setup(station)
-            except setup_module.CliError as err:
+            except kinds_module.CommandError as err:
                 self.error("setting up %s: %s" % (station.name, err))
         station.set_status(stations_module.UP)
         await self.read_transport(station)
@@ -237,47 +241,62 @@ class Simd:
             await self.flush_station(station)
 
     async def send_setup(self, station):
-        """The scenario's lines then the node's own, with the macros filled in.
+        """The station's lines (Scenario.lines_for), with the macros filled in.
 
         simd adds no *settings* of its own: the lines in the file are the whole
-        of what a station is told, including its hostname, because `{name}` in
-        a shared line is what lets one list say node-specific things.
+        of what a station is told, including its name, because `{name}` in a
+        shared line is what lets one list say node-specific things.
 
-        It does add `save`. The store coalesces writes for
-        `s.storage.flash_delay` seconds — a minute by default — so a station
-        set up and then reset inside that window comes back with none of it. On
-        a board that is a power cut and fair; here, Reset is a button a person
-        presses the moment a node comes up, and a testbed that lost its own
-        setup that way would be lying about what it had configured. `save` is
-        not a setting, which is why it is simd's to send and not the file's.
+        Its kind does flush once they are in. A store that coalesces writes
+        would otherwise come back from a Reset pressed the moment a node came
+        up with none of it, and a testbed that lost its own setup that way
+        would be lying about what it had configured.
         """
         lines = self.scenario.lines_for(station.name)
         if lines:
-            await setup_module.send(station.node_id, lines + ["save"])
+            await station.kind.setup(station, lines)
 
     async def start_station(self, name):
         station = self.make_station(name)
+        if not station.kind.elf or not os.path.exists(station.kind.elf):
+            self.error("%s: kind %s has no binary at %s"
+                       % (name, station.kind.name, station.kind.elf))
+            return
         self.stations[name] = station
-        station.run(self.after_start)
+        station.run(self.watch_after_start)
         self.broadcast(self.node_message(name))
+
+    async def watch_after_start(self, station):
+        """after_start, with anything it raises said rather than lost.
+
+        It runs as a task nobody awaits, so an exception in it would vanish
+        and leave the station showing whatever status it had reached.
+        """
+        try:
+            await self.after_start(station)
+        except asyncio.CancelledError:
+            raise
+        except Exception as err:                # noqa: BLE001 - see docstring
+            self.error("%s: %r" % (station.name, err))
 
     async def flush_station(self, station):
         """Ask a station to commit its store before we take it away from it.
 
-        The store coalesces writes for a minute by default, and some of what a
-        station records — an LXMF identity among them — lands there a little
-        after the command that asked for it. So anything that stops or resets a
-        station flushes it first, and so does taking a snapshot: a snapshot
-        copied out of a store with a minute of writes still in RAM would be a
-        picture of a moment that never quite existed.
+        A store may coalesce writes (reticulous holds them for a minute by
+        default), and some of what a station records — an LXMF identity among
+        them — lands there a little after the command that asked for it. So
+        anything that stops or resets a station flushes it first, and so does
+        taking a snapshot: a snapshot copied out of a store with a minute of
+        writes still in RAM would be a picture of a moment that never quite
+        existed. What a flush is, and whether there is one, is the kind's.
 
         Best effort. A station that will not answer is one whose store we
         cannot flush, and refusing to stop it over that would be worse.
         """
         if station.status not in (stations_module.UP, stations_module.SETUP):
             return
-        with contextlib.suppress(setup_module.CliError):
-            await setup_module.ask(station.node_id, "save", timeout=FLUSH_TIMEOUT_S)
+        with contextlib.suppress(kinds_module.CommandError):
+            await station.kind.flush(station)
 
     async def flush_all(self):
         await asyncio.gather(*(self.flush_station(s) for s in self.stations.values()),
@@ -345,16 +364,14 @@ class Simd:
         """Ask a station whether it is forwarding for others, and say so.
 
         Read live rather than taken from the scenario, because the setting is
-        live: a person can flip it in that station's own web UI, and the map
-        should show it without the scenario knowing.
+        live: a person can flip it on the station itself, and the map should
+        show it without the scenario knowing. A kind that cannot be asked
+        answers None, and the map shows it as unknown.
         """
         try:
-            reply = await setup_module.ask(station.node_id,
-                                           "show %s" % TRANSPORT_KEY)
-        except setup_module.CliError:
+            transport = await station.kind.transport(station)
+        except kinds_module.CommandError:
             return
-        value = setup_module.parse_setting(reply, TRANSPORT_KEY)
-        transport = value not in (None, "0", "")
         if transport != station.transport:
             station.transport = transport
             self.broadcast(self.node_message(station.name))
@@ -389,7 +406,10 @@ class Simd:
         station = self.stations.get(name)
         if node is None:
             return {"type": "node_gone", "name": name}
+        kind = self.kinds.get(node.get("kind"))
         return {"type": "node", "name": name, "id": node["id"],
+                "kind": node.get("kind"),
+                "web": kind is not None and kind.web_port() is not None,
                 "pos": list(node["pos"]), "gain_db": node.get("gain_db", 0.0),
                 "setup": list(node.get("setup") or []),
                 "status": station.status if station else stations_module.STOPPED,
@@ -437,7 +457,7 @@ class Simd:
             return
         try:
             await handler(msg)
-        except (scenario_module.ScenarioError, setup_module.CliError) as err:
+        except (scenario_module.ScenarioError, kinds_module.CommandError) as err:
             self.error(str(err))
         except OSError as err:
             self.error("%s: %s" % (kind, err))
@@ -449,7 +469,7 @@ class Simd:
 
     async def do_node_add(self, msg):
         sc = self.need_scenario()
-        node = sc.add_node(msg["name"], msg["pos"])
+        node = sc.add_node(msg["name"], msg["pos"], kind=msg.get("kind"))
         sc.flush()
         self.apply_to_ether()
         self.scenario_changed()
@@ -540,19 +560,23 @@ class Simd:
             await station.restart()
 
     async def do_command(self, msg):
-        """Run one CLI line on every running station and report what each said.
+        """Run one line on every running station of one kind and report what each said.
 
         The macros are expanded per station, so `lxmf create {name}` or
         `hostname {name}` does the right thing across the whole testbed in one
         go — which is what makes this general enough to have replaced a verb
-        that only ever re-sent the setup lines.
+        that only ever re-sent the setup lines. A line is in one kind's
+        dialect, so it goes only to stations of the kind named (the first
+        kind when none is).
         """
         sc = self.need_scenario()
         line = (msg.get("line") or "").strip()
         if not line:
             return
+        kind = msg.get("kind") or sc.default_kind
         targets = [(name, s) for name, s in self.stations.items()
-                   if s.status in (stations_module.UP, stations_module.SETUP)]
+                   if s.kind.name == kind
+                   and s.status in (stations_module.UP, stations_module.SETUP)]
         # Spread over this many seconds. A command that puts something on the
         # air — `lora 0 a` above all — fired at two dozen stations in the same
         # instant is a collision storm rather than a measurement, and the
@@ -565,16 +589,16 @@ class Simd:
             if gap:
                 await asyncio.sleep(index * gap)
             try:
-                text = await setup_module.ask(
-                    station.node_id, scenario_module.expand(line, name, sc.node(name)))
+                text = await station.kind.run(
+                    station, scenario_module.expand(line, name, sc.node(name)))
                 return name, text.rstrip("\n")
-            except (setup_module.CliError, scenario_module.ScenarioError) as err:
+            except (kinds_module.CommandError, scenario_module.ScenarioError) as err:
                 return name, "! %s" % err
 
         results = dict(await asyncio.gather(
             *(run(i, n, s) for i, (n, s) in enumerate(targets))))
         self.broadcast({"type": "command_result", "line": line, "results": results})
-        log("ran %r on %d station(s)%s" % (line, len(results),
+        log("ran %r on %d %s station(s)%s" % (line, len(results), kind,
             " over %.0fs" % spread if spread else ""))
 
     async def do_node_setup(self, msg):
@@ -627,8 +651,12 @@ class Simd:
 
     async def adopt(self, sc):
         """Make this the loaded scenario: stop what was running, start what is."""
+        kinds = kinds_module.make_kinds(sc.kinds, scenario_module.SCENARIOS_DIR)
         await self.stop_all()
         self.scenario = sc
+        self.kinds = kinds
+        for kind in kinds.values():
+            log("kind %s" % kind.describe())
         self.apply_to_ether()
         self.broadcast(self.snapshot())     # a new scenario is a fresh page
         self.begin_start_all()
@@ -726,8 +754,11 @@ class Simd:
         node = self.node_for_label(label)
         if node is None:
             return web.Response(status=404, text="no such station\n")
-        station_url = "http://%s%s" % (stations_module.bind_addr(node["id"]),
-                                       SIGNAL_PATH)
+        kind = self.kinds.get(node.get("kind"))
+        if kind is None or kind.web_port() is None:
+            return web.Response(status=404, text="no web UI on this station\n")
+        station_url = "http://%s:%d%s" % (stations_module.bind_addr(node["id"]),
+                                          kind.web_port(), SIGNAL_PATH)
 
         # The browser's credentials go up with it. Signalling is behind the
         # station's own login, and a relay that dropped the session cookie
@@ -875,10 +906,10 @@ class Simd:
                 loop.add_signal_handler(
                     sig, lambda: done.done() or done.set_result(None))
 
-        if not os.path.exists(self.elf):
-            raise SystemExit(
-                "no station binary at %s — build it for the host target first "
-                "(see SIMesh/README.md)" % self.elf)
+        if not os.path.exists(self.args.elf):
+            log("no reticulous station binary at %s: a scenario that names no "
+                "kinds cannot start its stations until it is built "
+                "(see SIMesh/README.md)" % self.args.elf)
         os.makedirs(scenario_module.SCENARIOS_DIR, exist_ok=True)
         os.makedirs(scenario_module.SNAPSHOTS_DIR, exist_ok=True)
 
@@ -925,8 +956,11 @@ def parse_args(argv):
                     help="host:port for the page and the stations (default 0.0.0.0:9011)")
     ap.add_argument("--ether", default="127.0.0.1:7000",
                     help="host:port for the ether's UDP endpoint")
-    ap.add_argument("--elf", default=DEFAULT_ELF, help="the station binary")
-    ap.add_argument("--fixed", default=DEFAULT_FIXED, help="the /fixed image directory")
+    ap.add_argument("--elf", default=DEFAULT_ELF,
+                    help="the reticulous station binary, for a scenario that "
+                         "names no kinds")
+    ap.add_argument("--fixed", default=DEFAULT_FIXED,
+                    help="that binary's /fixed tree")
     ap.add_argument("--relay-port", type=int, default=0,
                     help="the UDP port a browser sends the DataChannel to, as "
                          "the browser sees it (default: the bind port)")
@@ -946,6 +980,8 @@ def parse_args(argv):
     stations_module.ADDR_PREFIX = args.addr_prefix
     args.elf = os.path.abspath(args.elf)
     args.fixed = os.path.abspath(args.fixed)
+    scenario_module.DEFAULT_KINDS.clear()
+    scenario_module.DEFAULT_KINDS["reticulous"] = {"elf": args.elf, "fixed": args.fixed}
     args.public_port = args.bind.rpartition(":")[2]
     # The relay binds the same number as the page, on UDP — one number to
     # publish and one to remember. What the browser is told may differ, since

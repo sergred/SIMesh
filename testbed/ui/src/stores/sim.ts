@@ -15,6 +15,10 @@ export interface Node {
   setup: string[]
   status: Status
   transport: boolean | null
+  /** Which firmware the station is, from the scenario's `kinds:`. */
+  kind: string
+  /** Whether it has a web UI the proxy can reach. */
+  web: boolean
   /** The carrier the station last said it was on — the map shows it on hover. */
   freq?: number
   sf?: number
@@ -28,6 +32,8 @@ export interface Scenario {
   origin: [number, number]
   physics: { exponent: number; noise_figure_db: number; capture_db: number }
   setup: string[]
+  /** The scenario's station kinds, the default first. */
+  kinds: string[]
   obstructions: { between: [string, string]; db: number }[]
 }
 
@@ -206,12 +212,12 @@ export const useSim = defineStore('sim', {
     stopAll() { this.send({ type: 'stop_all' }) },
     resetAll() { this.send({ type: 'reset_all' }) },
     factoryResetAll() { this.send({ type: 'factory_reset_all' }) },
-    /** One CLI line on every running station, `{name}` and friends expanded.
-     *  `stagger` spreads the stations over that many seconds — 0 fires them
-     *  together, which is wrong for anything that transmits. */
-    runCommand(line: string, stagger = 0) {
+    /** One line on every running station of one kind, `{name}` and friends
+     *  expanded. `stagger` spreads the stations over that many seconds — 0
+     *  fires them together, which is wrong for anything that transmits. */
+    runCommand(line: string, stagger = 0, kind: string | null = null) {
       this.command = null
-      this.send({ type: 'command', line, stagger })
+      this.send({ type: 'command', line, stagger, kind })
     },
     setPhysics(values: Record<string, number>) {
       this.send({ type: 'physics', ...values })

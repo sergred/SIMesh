@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """One firmware process, its pty, its log and its supervisor.
 
-A station is the whole firmware built for the Linux host target and run as an
-ordinary process. It gets:
+A station is a whole firmware built for Linux and run as an ordinary process,
+keeping the station contract (STATION.md); its kind (kinds/) says which
+binary and how to talk to it. It gets:
 
-- a **directory** under the run, `run/nodes/<name>/`, which is its `/state`;
+- a **directory** under the run, `run/nodes/<name>/`, its cwd, with its
+  state under `state/`;
 - a **pty**, because its stdin and stdout are its serial console — the
   supervisor holds the master end, appends everything the station writes to
   `log`, and passes the same bytes to whoever is watching the console;
@@ -14,7 +16,7 @@ ordinary process. It gets:
   this target is a process exit.
 
 Status is what the map draws: `stopped` before anything is started and after
-it is told to stop, `starting` from the fork until the CLI answers, `setup`
+it is told to stop, `starting` from the fork until its kind says it is up, `setup`
 while its setup lines are going in, `up` once it is answering, `restarting`
 in the gap after an unasked-for exit. Nothing here decides when `setup`
 happens — the caller does that, through `on_status`.
@@ -52,13 +54,12 @@ def bind_addr(node_id):
 class Station:
     """One firmware process, its pty and its log."""
 
-    def __init__(self, name, node_id, directory, elf, fixed, ether_addr,
+    def __init__(self, name, node_id, directory, kind, ether_addr,
                  on_status=None, on_output=None):
         self.name = name
         self.node_id = node_id
         self.dir = directory
-        self.elf = elf
-        self.fixed = fixed
+        self.kind = kind                # a kinds.Kind: the binary and how to talk to it
         self.ether_addr = ether_addr
         self.on_status = on_status      # (station, status)
         self.on_output = on_output      # (station, bytes)
@@ -66,7 +67,7 @@ class Station:
         self.proc = None
         self.log_file = None
         self.status = STOPPED
-        self.transport = None           # last read of s.rnsd.transport_enabled
+        self.transport = None           # whether it forwards, as last read; None unknown
         # Whether this station had been through a first boot when it was last
         # started. Sampled at the fork, because the station writes `state/boot`
         # moments later and the answer the setup step needs is the one from
@@ -94,11 +95,11 @@ class Station:
     def configured(self):
         """True when this station has been through its first boot already.
 
-        The firmware writes `state/boot` once it has run; a directory without
-        it is a station that has never been set up, which is what decides
-        whether the scenario's setup lines go in.
+        What marks that is the kind's business — a file the firmware writes
+        once it has run — and a directory without it is a station that has
+        never been set up, which is what decides whether the setup lines go in.
         """
-        return os.path.exists(os.path.join(self.state_dir, "boot"))
+        return self.kind.configured(self)
 
     def set_status(self, status):
         if status == self.status:
@@ -111,11 +112,7 @@ class Station:
 
     def env(self):
         env = dict(os.environ)
-        env.update(SPANGAP_NODE_ID=str(self.node_id),
-                   SPANGAP_NODE_DIR=self.dir,
-                   SPANGAP_BIND_ADDR=self.addr,
-                   SPANGAP_ETHER=self.ether_addr,
-                   SPANGAP_FIXED_DIR=self.fixed)
+        env.update(self.kind.env(self))
         return env
 
     async def start(self):
@@ -131,13 +128,13 @@ class Station:
         self.master = master
         self.set_status(STARTING)
         self.proc = await asyncio.create_subprocess_exec(
-            self.elf, cwd=self.dir, env=self.env(),
+            self.kind.elf, cwd=self.dir, env=self.env(),
             stdin=slave, stdout=slave, stderr=slave)
         os.close(slave)
         os.set_blocking(master, False)
         asyncio.get_running_loop().add_reader(master, self.readable)
-        log("station %s (%d) up as pid %d on %s" % (
-            self.name, self.node_id, self.proc.pid, self.addr))
+        log("station %s (%d, %s) up as pid %d on %s" % (
+            self.name, self.node_id, self.kind.name, self.proc.pid, self.addr))
 
     def readable(self):
         """Drain the pty: everything a station prints lands in its log."""
@@ -199,9 +196,13 @@ class Station:
             watcher = None
             if after_start is not None:
                 watcher = asyncio.ensure_future(after_start(self))
-            code = await self.proc.wait()
-            if watcher is not None:
-                watcher.cancel()
+            try:
+                code = await self.proc.wait()
+            finally:
+                # Stopped or exited, this start is over, and so is its setup:
+                # a watcher left running would set up whatever comes next.
+                if watcher is not None:
+                    watcher.cancel()
             self.detach_reader()
             if self.stopping:
                 return

@@ -1,7 +1,10 @@
 <template>
   <q-card v-if="node" class="node-card" flat bordered>
     <div class="node-card-head">
-      <span class="node-card-name">{{ node.name }}</span>
+      <div class="node-card-title">
+        <span class="node-card-name">{{ node.name }}</span>
+        <span class="node-card-kind">{{ node.kind }}</span>
+      </div>
       <span class="node-card-id">#{{ node.id }}</span>
       <q-space />
       <q-btn flat dense round size="sm" aria-label="Close" @click="$emit('close')">
@@ -24,7 +27,7 @@
     <q-separator />
 
     <div class="node-card-actions">
-      <q-btn flat dense no-caps size="sm" label="Web UI" @click="openStation" />
+      <q-btn v-if="node.web" flat dense no-caps size="sm" label="Web UI" @click="openStation" />
       <q-btn flat dense no-caps size="sm" label="Console" @click="$emit('console', node.name)" />
       <q-btn flat dense no-caps size="sm" label="Reset" @click="sim.resetNode(node.name)">
         <q-tooltip>Presses reset — the process restarts, its state is untouched</q-tooltip>
@@ -43,7 +46,7 @@
         </q-card-section>
         <q-card-section>
           <div class="text-caption text-grey-6 q-mb-sm">
-            Sent after the scenario's own lines, on a first boot and on Apply setup.
+            Sent after the scenario's and its kind's lines, on a first boot.
           </div>
           <q-input v-model="draft" type="textarea" outlined dense autogrow
                    input-style="font-family: ui-monospace, monospace" />
@@ -138,7 +141,9 @@ function confirmRemove() {
   gap: 8px;
   padding: 6px 6px 6px 12px;
 }
+.node-card-title { display: flex; flex-direction: column; line-height: 1.2; }
 .node-card-name { font-weight: 600; }
+.node-card-kind { color: #6b7280; font-size: 11px; }
 .node-card-id { color: #6b7280; font: 11px ui-monospace, monospace; }
 .node-card-x { font-size: 18px; line-height: 1; color: #9ca3af; }
 .node-card-rows { padding: 8px 12px; font-size: 12px; }

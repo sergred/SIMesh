@@ -128,9 +128,12 @@
     <!-- Run command: one CLI line on every running station. -->
     <q-dialog v-model="commanding">
       <q-card style="min-width: 560px">
-        <q-card-section class="text-subtitle2">Run command on all nodes</q-card-section>
+        <q-card-section class="text-subtitle2">Run command on all nodes of one kind</q-card-section>
         <q-card-section>
           <div class="row q-col-gutter-sm">
+            <q-select v-if="kinds.length > 1" class="col-auto" style="width: 150px"
+                      v-model="commandKind" :options="kinds" outlined dense
+                      :disable="waiting" label="kind" />
             <q-input class="col" v-model="commandLine" outlined dense autofocus
                      label="CLI line" :disable="waiting"
                      input-style="font-family: ui-monospace, monospace"
@@ -180,7 +183,8 @@
         </q-card-section>
         <q-card-section>
           <div class="text-caption text-grey-6 q-mb-sm">
-            Setup lines — CLI commands every station is given, in order.
+            Setup lines — CLI commands every station of the first kind
+            ({{ kinds[0] ?? '—' }}) is given, in order.
           </div>
           <q-input v-model="setupDraft" type="textarea" outlined dense autogrow
                    input-style="font-family: ui-monospace, monospace" />
@@ -201,7 +205,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useQuasar } from 'quasar'
 import { useSim } from '../stores/sim'
 
@@ -213,6 +217,12 @@ const commanding = ref(false)
 const settings = ref(false)
 const commandLine = ref('')
 const commandSpread = ref(0)
+/* A line is in one kind's dialect, so it goes to the stations of one kind. */
+const kinds = computed<string[]>(() => sim.scenario?.kinds ?? [])
+const commandKind = ref<string | null>(null)
+watch(kinds, (list) => {
+  if (!commandKind.value || !list.includes(commandKind.value)) commandKind.value = list[0] ?? null
+}, { immediate: true })
 const waiting = ref(false)
 const setupDraft = ref('')
 const physics = reactive({ exponent: 2.7, noise_figure_db: 6, capture_db: 6 })
@@ -259,7 +269,7 @@ function runCommand() {
   const line = commandLine.value.trim()
   if (!line || waiting.value) return
   waiting.value = true
-  sim.runCommand(line, Number(commandSpread.value) || 0)
+  sim.runCommand(line, Number(commandSpread.value) || 0, commandKind.value)
 }
 
 // The replies arrive together, as one message, so the wait ends when they do.

@@ -19,12 +19,24 @@ python3 simd.py ─┬─ ether        (UDP, in-process)
 | the medium | [`ether/`](ether/README.md) |
 | the chip model, as a C library a station links | `radio/` |
 | the testbed process, the map, the scenarios | `testbed/` |
+| what a station process is promised and owes | [STATION.md](STATION.md) |
 
 It is the firmware under test, built for a different target — not an emulator.
 [INTERNALS.md](INTERNALS.md) says how it works and why it is built this way.
 
-spangap/reticulous is one user of it: its Linux station binary is the
-testbed's default, and the build below is how to make it.
+## Station kinds
+
+Stations of different firmwares share one ether and one map. Each firmware is
+a **kind**: the binary, and how the testbed talks to it (`testbed/kinds/`).
+Two exist:
+
+| Kind | The firmware | Up when | Setup lines are | Web UI |
+|---|---|---|---|---|
+| `reticulous` | spangap/reticulous, built for `hw-linux` | its TCP CLI on `:8081` answers | its CLI, typed over `:8081`, then `save` | port 80 |
+| `berlinmesh` | Sergey's Rust stack, `fw/simesh` in [his tree](https://git.emcomm.cc/berlinmesh/reticulum) | its `kiss` pty answers `rncfg detect` | `rncfg` without program and port: `name set {name}` runs `rncfg name <dir>/kiss set <name>` | none |
+
+A scenario that names no kinds has one, `reticulous`, from simd's `--elf` and
+`--fixed`.
 
 ## The build
 
@@ -51,6 +63,14 @@ what a station is, with its `/fixed` tree in
 Every target builds in its own `esp-idf/build.<target>/`, so a chip build
 (`build.esp32s3/`) and this one never touch each other's files, and switching
 between them rebuilds nothing.
+
+A `berlinmesh` station and its tool are built in his tree (`sergey/reticulum`
+in this workspace), with Rust:
+
+```sh
+cd sergey/reticulum/fw/simesh && cargo build --release    # fw/simesh/target/release/simesh
+cd sergey/reticulum && cargo build --release -p rncfg     # target/release/rncfg
+```
 
 ## Running it
 
@@ -95,7 +115,7 @@ that is already on disk.
 | right-click the background | **New node here** — asks a name and puts a station down |
 | hover a station | the lines to everything within earshot, with the level on each |
 | drag a station | move it; the medium is updated as you drag, so you can watch a link fade |
-| click a station | its card: status, position, transport, radio, and **Web UI**, **Console**, **Reset**, **Factory reset**, **Setup**, **Remove** |
+| click a station | its card: its kind, status, position, transport, radio, and **Web UI** (for a kind that has one), **Console**, **Reset**, **Factory reset**, **Setup**, **Remove** |
 
 A dot is grey stopped, amber starting or in setup, white up, red restarting. A
 second ring around it means the station is acting as a Reticulum transport
@@ -166,11 +186,44 @@ so `alpha.sim.localhost` and `1.sim.localhost` are the same station.
 metres on an equirectangular plane around `origin`, so a scenario placed on
 real ground needs only its origin moved.
 
+### Kinds in a scenario
+
+A scenario that mixes firmwares names them under `kinds:`; a node says which
+it is with `kind:`, and a node that says nothing is of the first kind:
+
+```yaml
+kinds:
+  reticulous:                         # the first: the default, and scenario `setup:` is its
+    elf: ../../../reticulous/esp-idf/build.linux/reticulous.elf
+    fixed: ../../../reticulous/esp-idf/build.linux/data_merged
+  berlinmesh:
+    elf: ../../../sergey/reticulum/fw/simesh/target/release/simesh
+    tools: { rncfg: ../../../sergey/reticulum/target/release/rncfg }
+    setup:                            # every node of this kind, before its own lines
+      - "set --freq-hz 869525000 --sf 8 --bw-hz 125000 --cr 5"
+      - "name set {name}"
+nodes:
+  alpha:  { id: 1, pos: [52.3740, 4.8897] }
+  sergey: { id: 2, kind: berlinmesh, pos: [52.3740, 4.9030] }
+```
+
+Every kind takes `elf:` (the binary), `env:` (extra environment) and
+`setup:`; `type:` picks the class and defaults to the kind's name, so two
+builds of one firmware can be two kinds of one type. `reticulous` also takes
+`fixed:`, `berlinmesh` takes `tools: { rncfg: }` (else `rncfg` on `PATH`).
+Paths are relative to `testbed/scenarios/`, where scenario files live — a
+snapshot's copy is read as if it lived there too — and an `env:` value is a
+path only when it starts with `./` or `../`. Ids are unique across kinds:
+two stations on one id would be one station to the ether.
+
 ### Setup lines
 
-They are CLI commands — what you would type at the station — so every setting
-the firmware has or grows is reachable without the testbed knowing its name.
-The scenario's list runs first, then the node's own.
+They are what you would type at the station — CLI commands for `reticulous`,
+`rncfg` verbs for `berlinmesh` — so every setting the firmware has or grows is
+reachable without the testbed knowing its name. A station of the first kind
+gets the scenario's `setup:`, then its kind's, then its own; a station of any
+other kind gets its kind's lines and its own, because a shared line is in one
+firmware's dialect and means something else, or nothing, in another's.
 
 Three macros are filled in per station, which is what lets one shared list say
 node-specific things:
@@ -207,10 +260,13 @@ start uses, and for the same reason: every station announces itself as it comes
 up, and two dozen of those at once is a collision storm no fleet of real boards
 would ever have.
 
-**Simulation ▸ Run command…** types one CLI line at every running station and
-lists what each one said. The macros are expanded per station, so
-`lora 0 freq 869.475` retunes the whole testbed and `rns` surveys it. This is
-the general tool: there is no separate verb for re-sending the setup lines.
+**Simulation ▸ Run command…** types one line at every running station of one
+kind — the dialog asks which when the scenario has more than one — and lists
+what each one said. The macros are expanded per station, so
+`lora 0 freq 869.475` retunes every `reticulous` station and `rns` surveys
+them, and `announce now` at the `berlinmesh` kind makes every one of those
+announce. This is the general tool: there is no separate verb for re-sending
+the setup lines.
 
 Beside the line is **spread**, in seconds. Left at 0 every station is asked at
 once, which is what a question wants — nothing goes on the air to answer
@@ -319,9 +375,10 @@ earlier run, and `--scenario <path>` names a different one.
 
 ## A station's own doors
 
-Each station serves its web UI on port 80 of its own loopback address, which is
-invisible outside the container; the proxy on the published port 9011 routes by
-hostname:
+A `reticulous` station serves its web UI on port 80 of its own loopback
+address, which is invisible outside the container; the proxy on the published
+port 9011 routes by hostname (a station of a kind with no web UI is refused
+with a sentence saying so, and its card has no **Web UI** button):
 
     http://alpha.sim.localhost:9011/    by name
     http://1.sim.localhost:9011/        by number
@@ -362,10 +419,12 @@ which is the point: the code under test is the shipping code, on both sides.
 Besides the map, a station is reachable three other ways:
 
 - **Console** on its card — its serial console, in a terminal window over a
-  websocket. First-run setup and every CLI command, exactly as a board on a
-  cable.
-- `nc 127.0.0.1<id> 8081` — its TCP CLI, the same command line, from a shell
-  in the container. This is the door simd itself uses for setup.
+  websocket. For `reticulous`, first-run setup and every CLI command, exactly
+  as a board on a cable; for `berlinmesh`, its log lines.
+- Its kind's own door, from a shell in the container: `nc 127.0.0.1<id> 8081`
+  is a `reticulous` station's TCP CLI, and `rncfg <verb> run/nodes/<name>/kiss`
+  talks KISS to a `berlinmesh` one, exactly as over USB. These are the doors
+  simd itself uses for setup.
 - `tail -f run/nodes/<name>/log` — everything it has printed, across restarts.
 
 A station that exits is started again, because a restart on this target is a
@@ -419,7 +478,7 @@ recursive lock, a UDP socket, a reader, a log — and two backends supply them:
 
 ```sh
 cd SIMesh/radio && cmake -B build && cmake --build build   # libsimradio.a, libsimradio.so
-python3 -m pytest SIMesh/radio/tests SIMesh/ether          # the model's tests and the ether's, no firmware
+python3 -m pytest SIMesh/radio/tests SIMesh/ether SIMesh/testbed   # every test here; none needs firmware
 ```
 
 The model's tests load `libsimradio.so` with ctypes, drive it frame by frame
@@ -459,18 +518,21 @@ code lives in that component's `src/host/`.
 
 | Where | What |
 |---|---|
-| `iface-lora/esp-idf/src/host/virtual_sx126x.*` | the chip: commands, registers, payload buffer, and the timing of a frame |
+| `radio/` | the chip and the station's UDP link to the ether, as a C library |
+| `iface-lora/esp-idf/src/host/virtual_sx126x.*`, `ether_task.*` | the reticulous firmware's own copy of the chip and the link, which its build links today |
 | `iface-lora/esp-idf/src/host/virtual_hal.*` | RadioLib's HAL over the GPIO shim and that model, in place of the SPI bus |
-| `iface-lora/esp-idf/src/host/ether_task.*` | the station's one UDP link to the ether |
 | [`ether/`](ether/README.md) | the medium: positions, path loss, who hears a frame and how it comes out |
 | `testbed/simd.py` | the process: the ether, the stations, the proxy, the control server |
 | `testbed/stations.py` | one firmware process, its pty, its log, its supervisor |
+| `testbed/kinds/` | one class per firmware: its environment, when it is up, how it is set up and asked things |
 | `testbed/scenario.py` | the scenario directory: load, save, save as, reload, new |
-| `testbed/setup.py` | the setup lines, sent to a station over its TCP CLI |
+| `testbed/setup.py` | a `reticulous` station's TCP CLI, which its kind speaks |
 | `testbed/proxy.py` | the hostname proxy |
 | `testbed/ui/` | the control page (Quasar 2 on Vue 3, one Pinia store) |
 | `testbed/seq.py` | the record as a sequence diagram |
 
 Nothing above the bus is aware of any of it: the LoRa driver, its CSMA and
 airtime accounting, Reticulum, LXMF and the web UI are the same code that runs
-on a board.
+on a board. The same holds for a `berlinmesh` station: its SX1262 driver,
+`LoRaIface` and engine are his, unchanged, over an embedded-hal bus that ends
+in `radio/`.

@@ -23,6 +23,7 @@ as they are writing it, their logs and the ether's record. Logs and the record
 are run output and are never copied into either kind of save.
 """
 
+import copy
 import json
 import os
 import re
@@ -67,6 +68,12 @@ DEFAULT_SETUP = [
 ]
 
 DEFAULT_PHYSICS = {"exponent": 2.7, "noise_figure_db": 6, "capture_db": 6}
+
+# The kinds a scenario that names none has: one `reticulous` kind, from simd's
+# --elf and --fixed. Set by simd before anything is read, so every scenario
+# written before kinds existed loads unchanged, and a file is given a `kinds:`
+# block only when it says more than this.
+DEFAULT_KINDS = {}
 
 MACRO_RE = re.compile(r"\{([a-z_]+)\}")
 
@@ -137,12 +144,43 @@ def expand_all(lines, name, node):
 # ---- the file ------------------------------------------------------------
 
 def blank():
-    """An empty scenario: an origin, the default air, the default setup."""
+    """An empty scenario: an origin, the default air, kinds and setup."""
     return {"origin": [0.0, 0.0],
             "physics": dict(DEFAULT_PHYSICS),
+            "kinds": copy.deepcopy(DEFAULT_KINDS),
             "setup": list(DEFAULT_SETUP),
             "nodes": {},
             "obstructions": []}
+
+
+def first_kind(data):
+    """The kind a node that names none is, and the one scenario `setup:` is for."""
+    return next(iter(data.get("kinds") or {}), None)
+
+
+def dump_value(value):
+    """A value inside a kind's spec: a scalar, a flow mapping, a flow list."""
+    if isinstance(value, dict):
+        return "{ %s }" % ", ".join("%s: %s" % (k, dump_value(v)) for k, v in value.items())
+    if isinstance(value, (list, tuple)):
+        return "[%s]" % ", ".join(dump_value(v) for v in value)
+    return scalar(value)
+
+
+def dump_kinds(kinds):
+    out = ["kinds:"]
+    for name, spec in kinds.items():
+        if not spec:
+            out.append("  %s: {}" % name)
+            continue
+        out.append("  %s:" % name)
+        for key, value in spec.items():
+            if key == "setup" and value:
+                out.append("    setup:")
+                out += ["      - %s" % scalar(line) for line in value]
+            else:
+                out.append("    %s: %s" % (key, dump_value(value)))
+    return out
 
 
 def scalar(value):
@@ -167,6 +205,11 @@ def dump(data):
         "%s: %s" % (key, scalar(physics.get(key, DEFAULT_PHYSICS[key])))
         for key in ("exponent", "noise_figure_db", "capture_db")))
 
+    kinds = data.get("kinds") or {}
+    if kinds and kinds != DEFAULT_KINDS:
+        out += dump_kinds(kinds)
+    default_kind = first_kind(data)
+
     setup = data.get("setup") or []
     out.append("setup:" if setup else "setup: []")
     out += ["  - %s" % scalar(line) for line in setup]
@@ -174,11 +217,15 @@ def dump(data):
     nodes = data.get("nodes") or {}
     out.append("nodes:" if nodes else "nodes: {}")
     for name, node in sorted(nodes.items(), key=lambda kv: kv[1]["id"]):
+        kind = node.get("kind")
+        kind = kind if kind and kind != default_kind else None
         if node.get("setup"):
             # A node with its own lines cannot stay on one line; write it as a
             # block so those lines are as editable as the scenario's own.
             out.append("  %s:" % name)
             out.append("    id: %s" % scalar(node["id"]))
+            if kind:
+                out.append("    kind: %s" % kind)
             out.append("    pos: [%s, %s]" % (scalar(node["pos"][0]),
                                               scalar(node["pos"][1])))
             if node.get("gain_db"):
@@ -186,9 +233,10 @@ def dump(data):
             out.append("    setup:")
             out += ["      - %s" % scalar(line) for line in node["setup"]]
         else:
-            head = "  %s: { id: %s, pos: [%s, %s]" % (
-                name, scalar(node["id"]),
-                scalar(node["pos"][0]), scalar(node["pos"][1]))
+            head = "  %s: { id: %s" % (name, scalar(node["id"]))
+            if kind:
+                head += ", kind: %s" % kind
+            head += ", pos: [%s, %s]" % (scalar(node["pos"][0]), scalar(node["pos"][1]))
             if node.get("gain_db"):
                 head += ", gain_db: %s" % scalar(node["gain_db"])
             out.append(head + " }")
@@ -210,18 +258,41 @@ def read(path):
             data = yaml.safe_load(handle) or {}
     except (OSError, yaml.YAMLError) as err:
         raise ScenarioError("%s: %s" % (path, err)) from err
+    if not isinstance(data, dict):
+        raise ScenarioError("%s: not a scenario" % path)
     filled = blank()
     filled["origin"] = [float(v) for v in (data.get("origin") or [0.0, 0.0])[:2]]
     filled["physics"] = {**DEFAULT_PHYSICS, **(data.get("physics") or {})}
+    kinds = data.get("kinds")
+    if kinds:
+        if not isinstance(kinds, dict) or not all(
+                isinstance(spec, dict) or spec is None for spec in kinds.values()):
+            raise ScenarioError("%s: `kinds:` is a mapping of kind name to its spec" % path)
+        filled["kinds"] = {str(name): dict(spec or {}) for name, spec in kinds.items()}
+    default_kind = first_kind(filled)
     filled["setup"] = list(data.get("setup") or [])
     filled["obstructions"] = [
         {"between": list(wall["between"])[:2], "db": float(wall.get("db", 0))}
         for wall in (data.get("obstructions") or [])]
     filled["nodes"] = {}
+    ids = {}
     for name, node in (data.get("nodes") or {}).items():
         check_name(name, "node")
+        kind = node.get("kind") or default_kind
+        kind = None if kind is None else str(kind)
+        if kind not in filled["kinds"]:
+            raise ScenarioError("%s: node %s is of kind %r, which `kinds:` does not name"
+                                % (path, name, kind))
+        node_id = int(node["id"])
+        if node_id in ids:
+            # Two stations under one id are two processes answering the ether
+            # as one station, and two sockets on one address.
+            raise ScenarioError("%s: nodes %s and %s share id %d"
+                                % (path, ids[node_id], name, node_id))
+        ids[node_id] = name
         filled["nodes"][name] = {
-            "id": int(node["id"]),
+            "id": node_id,
+            "kind": kind,
             "pos": [float(v) for v in (node.get("pos") or [0.0, 0.0])[:2]],
             "gain_db": float(node.get("gain_db", 0.0)),
             "setup": list(node.get("setup") or []),
@@ -317,6 +388,15 @@ class Scenario:
     def obstructions(self):
         return self.data["obstructions"]
 
+    @property
+    def kinds(self):
+        """Kind name -> its spec, in the file's order; the first is the default."""
+        return self.data["kinds"]
+
+    @property
+    def default_kind(self):
+        return first_kind(self.data)
+
     def node(self, name):
         node = self.nodes.get(name)
         if node is None:
@@ -327,9 +407,19 @@ class Scenario:
         return os.path.join(self.run_dir, NODES_DIR, name)
 
     def lines_for(self, name):
-        """Everything a station is told, in order, with the macros filled in."""
+        """Everything a station is told, in order, with the macros filled in.
+
+        The scenario's own `setup:` goes only to nodes of the first kind: a
+        line is in one firmware's dialect, and the same text typed at another
+        means something else or nothing. Then the node's kind's lines, then
+        its own.
+        """
         node = self.node(name)
-        return (expand_all(self.setup, name, node)
+        kind = node.get("kind") or self.default_kind
+        shared = self.setup if kind == self.default_kind else []
+        spec = self.kinds.get(kind) or {}
+        return (expand_all(shared, name, node)
+                + expand_all(spec.get("setup") or [], name, node)
                 + expand_all(node.get("setup") or [], name, node))
 
     def next_id(self):
@@ -345,11 +435,15 @@ class Scenario:
                 return candidate
         raise ScenarioError("a scenario holds at most %d nodes" % MAX_NODE_ID)
 
-    def add_node(self, name, pos, setup=None):
+    def add_node(self, name, pos, setup=None, kind=None):
         check_name(name, "node")
         if name in self.nodes:
             raise ScenarioError("there is already a node called %r" % name)
-        node = {"id": self.next_id(), "pos": [float(pos[0]), float(pos[1])],
+        kind = kind or self.default_kind
+        if kind not in self.kinds:
+            raise ScenarioError("no kind called %r in this scenario" % kind)
+        node = {"id": self.next_id(), "kind": kind,
+                "pos": [float(pos[0]), float(pos[1])],
                 "gain_db": 0.0, "setup": list(setup or [])}
         self.nodes[name] = node
         self.dirty = True
@@ -431,7 +525,7 @@ class Scenario:
         """What the page is told about the scenario itself."""
         return {"name": self.name, "dirty": self.dirty,
                 "origin": list(self.origin), "physics": dict(self.physics),
-                "setup": list(self.setup),
+                "setup": list(self.setup), "kinds": list(self.kinds),
                 "obstructions": [dict(w) for w in self.obstructions]}
 
 

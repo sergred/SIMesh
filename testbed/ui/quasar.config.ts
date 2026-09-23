@@ -14,9 +14,9 @@ const linkedStraddles = Object.entries(pkg.dependencies ?? {})
   .filter(([, v]) => typeof v === 'string' && v.startsWith('file:'))
   .map(([name]) => name);
 
-// Where `quasar dev` sends /ws and /api. simd binds this inside the container;
-// `spangap sim --dev` runs the two side by side.
-const SIMD = process.env.SPANGAP_SIMD || 'http://127.0.0.1:9011';
+// Where `quasar dev` sends /ws and /api: simd, run beside it in the container
+// (`npm run dev` in this directory while simd.py runs).
+const SIMD = process.env.SIMESH_SIMD || 'http://127.0.0.1:9011';
 
 export default configure(() => {
   return {

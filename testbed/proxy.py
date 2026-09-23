@@ -10,7 +10,8 @@ the same station and a renamed node is still reachable by number.
 
 Which labels exist is not the proxy's business: `serve()` takes a `resolve`
 callable that turns one label and request path into a `(host, port)` to dial,
-or None for a request with nowhere to go. The path is there so a caller can
+None for a request with nowhere to go, or a `Refusal` saying why a station
+that exists will not take it. The path is there so a caller can
 keep one route to itself — simd takes `/webrtc` that way, to stand in the
 middle of a station's signalling. The label is None when the `Host` is not a
 `.sim.localhost` name at all, which is how simd puts the control page on the
@@ -101,6 +102,15 @@ async def pump(reader, writer):
             pass
 
 
+class Refusal:
+    """What a resolver returns for a station that exists but has nowhere to
+    route this request: the status line and a sentence saying why."""
+
+    def __init__(self, status, text):
+        self.status = status
+        self.text = text
+
+
 async def refuse(writer, status, text):
     body = text.encode("utf-8")
     writer.write(b"HTTP/1.1 " + status.encode("ascii") + b"\r\n"
@@ -130,6 +140,9 @@ async def handle(client_reader, client_writer, resolve):
                          "No station for that hostname. "
                          "Use http://<name>.sim.localhost:<port>/ or "
                          "http://<id>.sim.localhost:<port>/\n")
+            return
+        if isinstance(target, Refusal):
+            await refuse(client_writer, target.status, target.text)
             return
 
         host, port = target
