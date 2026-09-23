@@ -17,6 +17,7 @@ python3 simd.py ─┬─ ether        (UDP, in-process)
 | Piece | Where |
 |---|---|
 | the medium | [`ether/`](ether/README.md) |
+| the chip model, as a C library a station links | `radio/` |
 | the testbed process, the map, the scenarios | `testbed/` |
 
 It is the firmware under test, built for a different target — not an emulator.
@@ -399,6 +400,34 @@ it routes by station number only, since names are the scenario's:
 ```sh
 python3 testbed/proxy.py --bind 0.0.0.0:9011
 ```
+
+## The chip library
+
+`radio/` is the SX1262 model and the station's link to the ether, behind a
+C ABI of eight functions (`radio/include/simradio.h`): open the link, open a
+chip per radio slot, hand it SPI frames, pulse its reset, read its lines. A
+station of any language links it in place of a radio, below an unchanged
+driver.
+
+The model reaches its host through six services — a clock, one-shot timers, a
+recursive lock, a UDP socket, a reader, a log — and two backends supply them:
+
+| Backend | For |
+|---|---|
+| `radio/backend/posix/` | a plain process: `std::thread`, `CLOCK_MONOTONIC`, a `std::recursive_mutex` |
+| `radio/backend/esp-idf/` | an ESP-IDF firmware built for the Linux host target: esp_timer, a FreeRTOS critical section and task; an IDF component |
+
+```sh
+cd SIMesh/radio && cmake -B build && cmake --build build   # libsimradio.a, libsimradio.so
+```
+
+The ESP-IDF backend is proved by a throwaway project that links it against
+the IDF host port and sends one frame (`radio/tests/esp-idf-link/`; the
+commands are at the top of its `CMakeLists.txt`).
+
+The reticulous firmware in this workspace still carries its own copy of the
+model in `iface-lora/esp-idf/src/host/`, listed below; it does not link this
+library yet.
 
 ## Where the code lives
 
