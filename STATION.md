@@ -11,7 +11,7 @@ the testbed; what differs between firmwares beyond it is a **kind**
 |---|---|
 | `SIMESH_NODE_ID` | a small integer, unique on the host; the last byte of any MAC the station makes, and the `sid` it gives the ether |
 | `SIMESH_NODE_DIR` | the station's directory; its working directory; its state lives under `state/` |
-| `SIMESH_BIND_ADDR` | its own loopback address, `127.0.0.1<id>` by default; every socket it opens binds here |
+| `SIMESH_BIND_ADDR` | its own loopback address, fixed by its id in the testbed's network (`simd --net`, a /22 holding 1000 stations by default); every socket it opens binds here |
 | `SIMESH_ETHER` | `host:port` of the ether |
 | the kind's `env:` | anything the binary needs beyond that |
 

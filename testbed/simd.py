@@ -971,13 +971,16 @@ def parse_args(argv):
     ap.add_argument("--relay-host", default="127.0.0.1",
                     help="the address a browser sends the DataChannel to "
                          "(default 127.0.0.1)")
-    ap.add_argument("--addr-prefix", default=stations_module.ADDR_PREFIX,
-                    help="a station's address is this with its id after it "
-                         "(default %s, so node 5 is %s5); a second testbed on "
-                         "the same host needs its own, 127.0.1.1 say"
-                         % (stations_module.ADDR_PREFIX, stations_module.ADDR_PREFIX))
+    ap.add_argument("--net", default=stations_module.NET,
+                    help="the network the stations' addresses come from, one "
+                         "/24 at a time with hosts 5 to 254 (default %s: 1000 "
+                         "stations); a second testbed on the same host needs "
+                         "its own, 127.0.4.0/22 say" % stations_module.NET)
     args = ap.parse_args(argv)
-    stations_module.ADDR_PREFIX = args.addr_prefix
+    try:
+        stations_module.set_net(args.net)
+    except ValueError as err:
+        ap.error(str(err))
     args.elf = os.path.abspath(args.elf)
     args.fixed = os.path.abspath(args.fixed)
     scenario_module.DEFAULT_KINDS.clear()

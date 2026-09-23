@@ -10,8 +10,8 @@ binary and how to talk to it. It gets:
 - a **pty**, because its stdin and stdout are its serial console — the
   supervisor holds the master end, appends everything the station writes to
   `log`, and passes the same bytes to whoever is watching the console;
-- a **loopback address**, `127.0.0.1<id>` by default (`bind_addr`), where
-  its sockets bind;
+- a **loopback address** its id fixes in the testbed's network (`bind_addr`),
+  where its sockets bind;
 - a **supervisor** that starts it again when it exits, because a restart on
   this target is a process exit.
 
@@ -23,19 +23,23 @@ happens — the caller does that, through `on_status`.
 """
 
 import asyncio
+import ipaddress
 import os
 import pty
 import sys
 import tty
 
 RESTART_DELAY = 0.5         # seconds before a station that exited comes back
-MAX_NODE_ID = 99            # <prefix><id> must stay a legal address
 
-# A station's address is this prefix with its id written after it, so node 5
-# is 127.0.0.15. `simd --addr-prefix` moves the whole set, which is how two
-# testbeds share one host: every station binds its own address, and two
-# stations with one address are one port taken twice.
-ADDR_PREFIX = "127.0.0.1"
+# Stations take their addresses from one network, `simd --net`, filled one /24
+# at a time with hosts 5 to 254: node 1 is the first network's .5, node 250
+# its .254, node 251 the next network's .5. A /22 is four of those, 1000
+# stations. Every station binds its own address, so two testbeds on one host
+# take two networks; two stations with one address are one port taken twice.
+NET = "127.0.0.0/22"
+HOST_FIRST = 5
+HOST_LAST = 254
+HOSTS_PER_NET = HOST_LAST - HOST_FIRST + 1
 
 STOPPED, STARTING, SETUP, UP, RESTARTING = (
     "stopped", "starting", "setup", "up", "restarting")
@@ -46,9 +50,30 @@ def log(msg):
     sys.stderr.flush()
 
 
+def set_net(cidr):
+    """Take the station network from `simd --net`; a /24 or wider."""
+    global NET
+    net = ipaddress.ip_network(cidr, strict=False)
+    if net.version != 4 or net.prefixlen > 24:
+        raise ValueError("the station network must be an IPv4 /24 or wider, not %s" % cidr)
+    NET = str(net)
+
+
+def max_node_id():
+    """How many stations the network holds: 250 per /24 in it."""
+    net = ipaddress.ip_network(NET)
+    return HOSTS_PER_NET * (1 << (24 - net.prefixlen))
+
+
 def bind_addr(node_id):
     """The station's own loopback address."""
-    return "%s%d" % (ADDR_PREFIX, node_id)
+    net = ipaddress.ip_network(NET)
+    index = node_id - 1
+    if not 0 <= index < max_node_id():
+        raise ValueError("node id %d is outside the %d the network %s holds"
+                         % (node_id, max_node_id(), NET))
+    subnet, host = divmod(index, HOSTS_PER_NET)
+    return str(net.network_address + subnet * 256 + HOST_FIRST + host)
 
 
 class Station:

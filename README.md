@@ -10,7 +10,7 @@ the stations and shows every frame on the air.
                     container                                        browser
 python3 simd.py ─┬─ ether        (UDP, in-process)
                  ├─ stations     (firmware processes, one pty each)
-                 ├─ proxy        <name>.sim.localhost:9011 ─► 127.0.0.1<id>:80
+                 ├─ proxy        <name>.sim.localhost:9011 ─► <the station's address>:80
                  └─ control      localhost:9011  ◄──── websocket ──── the map
 ```
 
@@ -32,8 +32,11 @@ Two exist:
 
 | Kind | The firmware | Up when | Setup lines are | Web UI |
 |---|---|---|---|---|
-| `reticulous` | spangap/reticulous, built for `hw-linux` | its TCP CLI on `:8081` answers | its CLI, typed over `:8081`, then `save` | port 80 |
-| `berlinmesh` | Sergey's Rust stack, `fw/simesh` in [his tree](https://git.emcomm.cc/berlinmesh/reticulum) | its `kiss` pty answers `rncfg detect` | `rncfg` without program and port: `name set {name}` runs `rncfg name <dir>/kiss set <name>` | none |
+| `reticulous` | Reticulous (spangap/reticulous), built for `hw-linux` | its TCP CLI on `:8081` answers | its CLI, typed over `:8081`, then `save` | port 80 |
+| `berlinmesh` | Sergeyculum, the Rust Reticulum stack at [git.emcomm.cc/berlinmesh/reticulum](https://git.emcomm.cc/berlinmesh/reticulum), as its `fw/simesh` target | its `kiss` pty answers `rncfg detect` | `rncfg` without program and port: `name set {name}` runs `rncfg name <dir>/kiss set <name>` | none |
+
+Sergeyculum is a working name; the project calls itself `reticulum` and the
+kind is named after its repository.
 
 A scenario that names no kinds has one, `reticulous`, from simd's `--elf` and
 `--fixed`.
@@ -64,8 +67,8 @@ Every target builds in its own `esp-idf/build.<target>/`, so a chip build
 (`build.esp32s3/`) and this one never touch each other's files, and switching
 between them rebuilds nothing.
 
-A `berlinmesh` station and its tool are built in his tree (`sergey/reticulum`
-in this workspace), with Rust:
+A `berlinmesh` station and its tool are built in the Sergeyculum tree
+(`sergey/reticulum` in this workspace), with Rust:
 
 ```sh
 cd sergey/reticulum/fw/simesh && cargo build --release    # fw/simesh/target/release/simesh
@@ -91,17 +94,20 @@ That starts the ether, the stations, the proxy and the control page, on
 stops everything it started. It takes `--bind` (default `0.0.0.0:9011`),
 `--ether` (default `127.0.0.1:7000`), `--elf` and `--fixed` (the reticulous
 binary and its `/fixed` tree, defaulting to the build above), `--stagger`,
-and `--addr-prefix`.
+and `--net`.
 
 **Two testbeds on one host** need their own port, their own ether and their
 own station addresses, because every station binds its own address and two
 stations on one address are one port taken twice:
 
 ```sh
-python3 simd.py --bind 0.0.0.0:9012 --ether 127.0.0.1:7001 --addr-prefix 127.0.1.1
+python3 simd.py --bind 0.0.0.0:9012 --ether 127.0.0.1:7001 --net 127.0.4.0/22
 ```
 
-puts node 5 on `127.0.1.15` instead of `127.0.0.15`.
+takes its addresses from `127.0.4.0/22` instead of `127.0.0.0/22`. A network
+is filled one /24 at a time with hosts 5 to 254: node 1 is the network's
+first `.5`, node 250 its `.254`, node 251 the next /24's `.5`. The default
+/22 holds 1000 stations; a wider network holds more.
 
 ## The map
 
@@ -178,8 +184,9 @@ obstructions:
 ```
 
 **A node is a name and a number.** The name is the station's hostname, the
-label on the map and the hostname the proxy routes; the number is its loopback
-address, `127.0.0.1<id>`, and its `SIMESH_NODE_ID`. The proxy answers to both,
+label on the map and the hostname the proxy routes; the number is its
+`SIMESH_NODE_ID`, which fixes its loopback address in the testbed's network
+(node 1 is `127.0.0.5` under the default). The proxy answers to both,
 so `alpha.sim.localhost` and `1.sim.localhost` are the same station.
 
 **Positions are latitude and longitude in degrees.** The ether projects them to
@@ -209,9 +216,10 @@ nodes:
 
 `testbed/scenarios/mixed.yaml` is such a scenario: three `reticulous`
 stations 1 km apart in a line with transport on, a `berlinmesh` station 50 m
-beyond each end, and 80 dB between those two. Ours are set to his sync word
-(`lora 0 sync 0x12`) and preamble (`lora 0 preamble 18`), without which the
-ether delivers nothing between the two kinds.
+beyond each end, and 80 dB between those two. The Reticulous stations are set
+to Sergeyculum's sync word (`lora 0 sync 0x12`) and preamble
+(`lora 0 preamble 18`), without which the ether delivers nothing between the
+two kinds.
 
 Every kind takes `elf:` (the binary), `env:` (extra environment) and
 `setup:`; `type:` picks the class and defaults to the kind's name, so two
@@ -221,6 +229,38 @@ Paths are relative to `testbed/scenarios/`, where scenario files live — a
 snapshot's copy is read as if it lived there too — and an `env:` value is a
 path only when it starts with `./` or `../`. Ids are unique across kinds:
 two stations on one id would be one station to the ether.
+
+### A mixed run, step by step
+
+What `mixed.yaml` shows once its five stations are up, and the command that
+shows it. `rncfg` is Sergeyculum's tool; `<kiss>` is `run/nodes/<name>/kiss`.
+A Reticulous station answers on its TCP CLI, port 8081 on its own address
+(`{addr}` in a setup line, `127.0.4.5` for node 1 under the `--net` below),
+or through **Run command** on the page.
+
+| What | How to see it |
+|---|---|
+| announces cross both ways | `seq.py --only ANNOUNCE`: every station's announce reaches its neighbours of the other kind. A Sergeyculum announce is 199 B and reads as `?<hash>` because its app name is not one `seq.py` knows |
+| a path forms through the Reticulous transports | `rncfg heard <kiss>` on each Sergeyculum station lists the other at `hops 2`; the Reticulous stations repeat Sergeyculum announces as `via <fp> hops=1` in the record. The repeat follows the Reticulous announce schedule, so allow a minute |
+| a packet routes through | `rncfg send <kiss> <lxmf.delivery of the other> <text>` (48 B at most; longer needs a link). The record shows the Sergeyculum frame, the Reticulous forward at `hops=1`, the Sergeyculum proof. `rncfg mbox <kiss> count` at the far end |
+| two-frame splits both ways | a 260 B Sergeyculum packet leaves as `254B split 1/2` + `6B split 2/2` and all three Reticulous stations reassemble it; `lxmf send <a Sergeyculum lxmf.delivery> <180 chars>` at a Reticulous station is 291 B on the wire and goes the same way. Over 500 B Reticulous LXMF opens a link and offers a resource instead |
+| CSMA under contention | count overlapping `tx` spans in `record.tsv` by kind pair. Across kinds, overlaps are starts within one preamble of each other, which no listener can see, plus a frame that starts straight after a station's own transmission ends |
+| the hidden terminal | `rncfg announce <kiss>` at both Sergeyculum stations in one instant: alpha keeps sergey1's frame, charlie keeps sergey2's, bravo in the middle keeps neither |
+
+Three things the two stacks do differently, all visible in the record:
+
+- **Sergeyculum receives no resources.** A link to it establishes, and every
+  resource advertisement is answered with a resource cancel. A Reticulous
+  LXMF message over the 500 B packet limit is therefore never delivered to a
+  Sergeyculum station; under it, it is.
+- **A proof is forwarded only by the transport that forwarded the packet.**
+  When a Sergeyculum proof reaches a Reticulous transport that did not carry
+  the packet, it ends there, and the sender gives up on the message after its
+  timeout. A frame lost to a collision on the way is the usual cause.
+- **Reticulous SUPE announces are foreign frames to a Sergeyculum build
+  without SUPE**, and the reverse. The Sergeyculum log counts them as
+  `frame(s) dropped — first byte 0xc3 is not our framing`; the type byte is
+  disjoint from the split framing by design.
 
 ### Setup lines
 
@@ -238,7 +278,7 @@ node-specific things:
 |---|---|
 | `{name}` | the node's name — `alpha` |
 | `{id}` | its station number — `1` |
-| `{addr}` | its loopback address — `127.0.0.11` |
+| `{addr}` | its loopback address — `127.0.0.5` |
 
 Anything else in braces is left exactly as written. The file is the whole of
 what a station is told: nothing is added behind your back, which is why
@@ -427,7 +467,7 @@ Besides the map, a station is reachable three other ways:
 - **Console** on its card — its serial console, in a terminal window over a
   websocket. For `reticulous`, first-run setup and every CLI command, exactly
   as a board on a cable; for `berlinmesh`, its log lines.
-- Its kind's own door, from a shell in the container: `nc 127.0.0.1<id> 8081`
+- Its kind's own door, from a shell in the container: `nc <addr> 8081`
   is a `reticulous` station's TCP CLI, and `rncfg <verb> run/nodes/<name>/kiss`
   talks KISS to a `berlinmesh` one, exactly as over USB. These are the doors
   simd itself uses for setup.
@@ -540,5 +580,5 @@ code lives in that component's `src/host/`.
 Nothing above the bus is aware of any of it: the LoRa driver, its CSMA and
 airtime accounting, Reticulum, LXMF and the web UI are the same code that runs
 on a board. The same holds for a `berlinmesh` station: its SX1262 driver,
-`LoRaIface` and engine are his, unchanged, over an embedded-hal bus that ends
-in `radio/`.
+`LoRaIface` and engine are Sergeyculum's own, unchanged, over an embedded-hal
+bus that ends in `radio/`.

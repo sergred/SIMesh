@@ -3,7 +3,7 @@
 
 A station speaks real WebRTC — the same ICE, DTLS and SCTP a board speaks,
 from the same source. What it cannot do here is be reached: its candidate is
-`127.0.0.1<id>:4433`, an address inside the container, and the browser is
+port 4433 on its own address, one inside the container, and the browser is
 outside it with one published port to work with.
 
 So simd stands in the middle, in the two places ICE needs it:

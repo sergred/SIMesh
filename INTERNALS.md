@@ -71,7 +71,7 @@ the air's problem.
 
 The control page and every station's web UI are on the same published port.
 The front listener reads just enough of each request to find `Host`:
-`<name|id>.sim.localhost` is proxied to that station's own `127.0.0.1<id>:80`,
+`<name|id>.sim.localhost` is proxied to port 80 on that station's own address,
 and everything else is proxied to the aiohttp app, which is bound to a
 loopback port nothing outside can reach.
 

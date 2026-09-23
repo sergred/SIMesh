@@ -3,7 +3,7 @@
 
 Only published container ports are reachable from a browser outside the
 container, so one port fronts every station: `Host: <label>.sim.localhost` is
-routed to that station's own loopback address, `127.0.0.1<id>:80`, which keeps
+routed to port 80 on that station's own loopback address, which keeps
 each station's canonical URL space and its websockets intact. The label is the
 station's name or its id, so `alpha.sim.localhost` and `1.sim.localhost` reach
 the same station and a renamed node is still reachable by number.
@@ -56,7 +56,7 @@ def resolve_by_id(label, path=""):
     if not label or not label.isdigit():
         return None
     node_id = int(label)
-    if not 1 <= node_id <= stations_module.MAX_NODE_ID:
+    if not 1 <= node_id <= stations_module.max_node_id():
         return None
     return (stations_module.bind_addr(node_id), STATION_PORT)
 
@@ -177,7 +177,7 @@ async def serve(host, port, resolve=resolve_by_id):
     server = await asyncio.start_server(on_client, host, port)
     bound = ", ".join("%s:%d" % s.getsockname()[:2] for s in server.sockets)
     log("listening on %s, routing <name|id>.sim.localhost to the station's "
-        "own %s<id>:%d" % (bound, stations_module.ADDR_PREFIX, STATION_PORT))
+        "own address in %s, port %d" % (bound, stations_module.NET, STATION_PORT))
     return server
 
 

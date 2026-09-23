@@ -6,7 +6,7 @@ The lines are CLI commands, so every setting the firmware has — or grows —
 is reachable without this file knowing its name, and since they are settings
 rather than actions, sending them again is harmless.
 
-The channel is the station's own TCP CLI on `127.0.0.1<id>:8081`, which on
+The channel is the station's own TCP CLI, port 8081 on its own address, which on
 this target is open from boot and needs no login. It is line-oriented and
 echoes nothing; what marks the end of a command's output is the prompt, a
 whole line ending in `"$ "`. So an exchange is: drain to the prompt, write

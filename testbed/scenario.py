@@ -45,8 +45,6 @@ NODES_DIR = "nodes"
 # quietly minting a new one named after the snapshot.
 ORIGIN_FILE = "from"
 
-MAX_NODE_ID = stations_module.MAX_NODE_ID
-
 # A node's name is its hostname, the label the proxy routes and the label on
 # the map, so it is what all three can carry.
 NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$")
@@ -430,10 +428,12 @@ class Scenario:
         come back, because nothing is left that answers to it.
         """
         taken = {node["id"] for node in self.nodes.values()}
-        for candidate in range(1, MAX_NODE_ID + 1):
+        limit = stations_module.max_node_id()
+        for candidate in range(1, limit + 1):
             if candidate not in taken:
                 return candidate
-        raise ScenarioError("a scenario holds at most %d nodes" % MAX_NODE_ID)
+        raise ScenarioError("a scenario holds at most %d nodes on the network %s"
+                            % (limit, stations_module.NET))
 
     def add_node(self, name, pos, setup=None, kind=None):
         check_name(name, "node")

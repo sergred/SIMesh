@@ -111,9 +111,9 @@ def test_every_kind_gets_the_contract_and_reticulous_its_own_names(tmp_path):
     data = scenario_module.read(write(tmp_path, MIXED))
     kinds = kinds_module.make_kinds(data["kinds"], str(tmp_path))
     station = types.SimpleNamespace(node_id=4, dir="/run/nodes/delta",
-                                    addr="127.0.0.14", ether_addr="127.0.0.1:7000")
+                                    addr="127.0.0.8", ether_addr="127.0.0.1:7000")
     contract = {"SIMESH_NODE_ID": "4", "SIMESH_NODE_DIR": "/run/nodes/delta",
-                "SIMESH_BIND_ADDR": "127.0.0.14", "SIMESH_ETHER": "127.0.0.1:7000"}
+                "SIMESH_BIND_ADDR": "127.0.0.8", "SIMESH_ETHER": "127.0.0.1:7000"}
 
     theirs = kinds["berlinmesh"].env(station)
     assert theirs == dict(contract, RUST_LOG="info")

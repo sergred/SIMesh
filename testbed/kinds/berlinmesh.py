@@ -1,18 +1,18 @@
-"""Sergey's Rust Reticulum stack (git.emcomm.cc/berlinmesh/reticulum), as its
-Linux station `fw/simesh`.
+"""Sergeyculum, the Rust Reticulum stack at git.emcomm.cc/berlinmesh/reticulum,
+as its Linux station `fw/simesh`. The kind is named after the repository.
 
 Spec keys beyond the common ones:
 
-    tools: { rncfg: <path> }    his configuration tool; `rncfg` on PATH when absent
+    tools: { rncfg: <path> }    its configuration tool; `rncfg` on PATH when absent
 
 A station of this kind has no text console and no web UI. Its host door is
 RNode KISS on a pty it makes itself and links as `kiss` in its directory; the
 console (stdout) carries its log lines. It is configured with `rncfg`, one
-invocation per line, the way a person configures his boards over USB. Its
-key-value writes are synchronous, so there is nothing to flush.
+invocation per line, the way a person configures a Sergeyculum board over USB.
+Its key-value writes are synchronous, so there is nothing to flush.
 
 A setup line is `rncfg` without the program and the port: `<verb> <args…>`,
-and the port goes in after the verb, which is where his argv has it
+and the port goes in after the verb, which is where `rncfg` has it
 (`rncfg <verb> <PORT> …`). So `set --freq-hz 869525000 --sf 8` runs
 `rncfg set <dir>/kiss --freq-hz 869525000 --sf 8`, and `name set {name}`
 names the station.
