@@ -1,0 +1,36 @@
+origin: [52.374, 4.8897]
+physics: { exponent: 2.7, noise_figure_db: 6, capture_db: 6 }
+setup:
+  - "hostname {name}"
+  - "auth passwd admin admin"
+  - "set s.rnsd.transport_enabled 1"
+  - "set s.lora.0.tx_power 14"
+  - "lora up"
+  - "lora 0 freq 869.525"
+  - "lora 0 sf 8"
+  - "lora 0 bw 125"
+nodes:
+  n01:
+    id: 1
+    pos: [52.381748, 4.814510]
+    setup:
+      - "lxmf create {name}"
+  n02:
+    id: 2
+    pos: [52.392205, 4.852384]
+    setup:
+      - "set s.lora.0.SUPE.afa 1"
+      - "set s.lora.0.SUPE.enable 1"
+      - "lxmf create {name}"
+  n03:
+    id: 3
+    pos: [52.297889, 4.925775]
+    setup:
+      - "set s.lora.rnode.tcp 1"
+  n04:
+    id: 4
+    pos: [52.433118, 4.750006]
+    setup:
+      - "set s.lora.0.SUPE.afa 1"
+      - "set s.lora.0.SUPE.enable 1"
+      - "set s.lora.rnode.tcp 1"

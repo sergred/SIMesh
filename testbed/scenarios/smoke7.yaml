@@ -1,0 +1,111 @@
+origin:
+- 52.374
+- 4.8897
+physics:
+  exponent: 2.7
+  noise_figure_db: 6
+  capture_db: 6
+setup:
+- hostname {name}
+- auth passwd admin admin
+- log rnsd debug
+nodes:
+  internet:
+    id: 1
+    pos:
+    - 52.374
+    - 4.447777
+    setup:
+    - set s.rnsd.transport_enabled 1
+    - set s.tcp.servers.0.id 1
+    - set s.tcp.servers.0.enable 1
+    - set s.tcp.servers.0.port 4965
+    - set s.tcp.servers.0.mode access_point
+    - set s.tcp.servers.0.max_conns 16
+    - set s.tcp.servers.0.upnp 0
+    - set s.tcp.servers.0.community_radius 64
+    - lxmf create internet
+  gw02:
+    id: 2
+    pos:
+    - 52.374
+    - 4.8897
+    setup:
+    - set s.rnsd.transport_enabled 1
+    - set s.lora.0.tx_power 14
+    - lora up
+    - lora 0 freq 869.525
+    - lora 0 sf 8
+    - lora 0 bw 125
+    - set s.netgraph.community city
+    - set s.netgraph.passphrase citymesh-passphrase
+    - tcp peer add 127.0.0.11:4965
+    - lxmf create gw02
+  n03:
+    id: 3
+    pos:
+    - 52.374
+    - 5.029642
+    setup:
+    - set s.rnsd.transport_enabled 1
+    - set s.lora.0.tx_power 14
+    - lora up
+    - lora 0 freq 869.525
+    - lora 0 sf 8
+    - lora 0 bw 125
+    - set s.netgraph.community city
+    - set s.netgraph.passphrase citymesh-passphrase
+    - lxmf create n03
+  n04:
+    id: 4
+    pos:
+    - 52.374
+    - 5.169585
+    setup:
+    - set s.rnsd.transport_enabled 1
+    - set s.lora.0.tx_power 14
+    - lora up
+    - lora 0 freq 869.525
+    - lora 0 sf 8
+    - lora 0 bw 125
+    - set s.netgraph.community city
+    - set s.netgraph.passphrase citymesh-passphrase
+    - lxmf create n04
+  n05:
+    id: 5
+    pos:
+    - 52.374
+    - 5.309527
+    setup:
+    - set s.rnsd.transport_enabled 1
+    - set s.lora.0.tx_power 14
+    - lora up
+    - lora 0 freq 869.525
+    - lora 0 sf 8
+    - lora 0 bw 125
+    - set s.netgraph.community city
+    - set s.netgraph.passphrase citymesh-passphrase
+    - lxmf create n05
+  n06:
+    id: 6
+    pos:
+    - 52.374
+    - 5.449469
+    setup:
+    - set s.rnsd.transport_enabled 1
+    - set s.lora.0.tx_power 14
+    - lora up
+    - lora 0 freq 869.525
+    - lora 0 sf 8
+    - lora 0 bw 125
+    - set s.netgraph.community city
+    - set s.netgraph.passphrase citymesh-passphrase
+    - lxmf create n06
+  out07:
+    id: 7
+    pos:
+    - 52.418966
+    - 4.447777
+    setup:
+    - tcp peer add 127.0.0.11:4965
+    - lxmf create out07

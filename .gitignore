@@ -1,0 +1,8 @@
+testbed/run/
+testbed/snapshots/
+testbed/ui/dist/
+testbed/ui/node_modules/
+testbed/ui/.quasar/
+radio/build/
+__pycache__/
+.pytest_cache/
