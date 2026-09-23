@@ -5,7 +5,9 @@ Stations announce themselves with `hello`, describe their radio with `state`
 and hand over a transmission with `tx`; the ether answers `welcome`,
 `rx_begin` and `rx_end`. A frame reaches every other station that is close
 enough for it to rise out of the noise and whose latest state is `RX` on the
-same carrier, bandwidth, spreading factor and sync word. Two frames sharing a
+same carrier, bandwidth, spreading factor and sync word. A station in `CAD`
+on that carrier is told the frame is arriving and nothing more: it is sensing
+energy, not receiving. Two frames sharing a
 carrier and any instant of air interfere, and each receiver decides the
 outcome for itself: the stronger frame survives when it leads the other by the
 capture margin.
@@ -164,9 +166,19 @@ class Station:
         return self.states.get(slot)
 
     def listening(self, slot):
-        """True when this station's slot last said it was receiving."""
+        """True when this station's slot last said it was receiving or sensing.
+
+        A slot in CAD is listening for energy: it is told a frame is arriving,
+        which is what its channel activity detection needs to find, and never
+        told how one ended, because it is not demodulating anything.
+        """
         st = self.states.get(slot)
-        return bool(st) and st.get("mode") == "RX"
+        return bool(st) and st.get("mode") in ("RX", "CAD")
+
+    def sensing(self, slot):
+        """True when this station's slot last said it was in CAD."""
+        st = self.states.get(slot)
+        return bool(st) and st.get("mode") == "CAD"
 
 
 class Frame:
@@ -451,11 +463,18 @@ class Ether(asyncio.DatagramProtocol):
                     continue
                 if not self.matches(rstation.state(slot), msg):
                     continue
+                begin = {"type": "rx_begin", "slot": slot,
+                         "id": frame.eid, "t0": frame.start_us,
+                         "t_pre": frame.pre_us, "t_hdr": frame.hdr_us,
+                         "t_end": frame.end_us, "level": round(level)}
+                if rstation.sensing(slot):
+                    # Energy for a channel activity detection, not a
+                    # reception: no end is scheduled, so nothing is ruled on
+                    # and the map draws no reception for it.
+                    self.send(rsid, dict(begin, cad=True))
+                    continue
                 frame.receivers.append((rsid, slot, level))
-                self.send(rsid, {"type": "rx_begin", "slot": slot,
-                                 "id": frame.eid, "t0": frame.start_us,
-                                 "t_pre": frame.pre_us, "t_hdr": frame.hdr_us,
-                                 "t_end": frame.end_us, "level": round(level)})
+                self.send(rsid, begin)
                 self.loop.call_later(span / 1_000_000.0,
                                      self.deliver_end, frame, rsid, slot, level)
 

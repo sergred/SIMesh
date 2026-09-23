@@ -34,7 +34,7 @@ TRUNC_HASH = 16         # a Reticulum address is a truncated hash, 16 bytes
 
 # The verdict at an arrow head.
 HEAD = {"clean": ("▶", "◀"), "crc": ("✗", "✗"),
-        "hdr": ("✗", "✗"), "lost": ("·", "·")}
+        "hdr": ("✗", "✗"), "lost": ("·", "·"), "cad": ("~", "~")}
 
 RNODE_FLAG_SPLIT = 0x01     # the air frame is half of a packet
 MAGIC_PWRREQ = 0x04         # the four-byte power request that prefixes a frame
@@ -204,7 +204,7 @@ def read_record(path):
                 if sent is None:
                     continue    # a record that begins mid-frame
                 arriving[msg.get("id")] = sent
-                sent.heard[int(sid)] = "lost"
+                sent.heard[int(sid)] = "cad" if msg.get("cad") else "lost"
             else:
                 frame = arriving.get(msg.get("id"))
                 if frame is not None:
@@ -329,7 +329,8 @@ def main(argv=None):
         for row in rows[1:]:
             # The same frame, at another station: no stamp, no second reading.
             print("%8s  %s%s" % ("", " " * GUTTER, row))
-    print("\n▶ received  ✗ CRC failure  · reception never closed out")
+    print("\n▶ received  ✗ CRC failure  · reception never closed out  "
+          "~ sensed by a channel activity detection")
     return 0
 
 

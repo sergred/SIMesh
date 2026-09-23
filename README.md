@@ -419,7 +419,11 @@ recursive lock, a UDP socket, a reader, a log — and two backends supply them:
 
 ```sh
 cd SIMesh/radio && cmake -B build && cmake --build build   # libsimradio.a, libsimradio.so
+python3 -m pytest SIMesh/radio/tests SIMesh/ether          # the model's tests and the ether's, no firmware
 ```
+
+The model's tests load `libsimradio.so` with ctypes, drive it frame by frame
+the way a driver does, and play the ether on a UDP socket of their own.
 
 The ESP-IDF backend is proved by a throwaway project that links it against
 the IDF host port and sends one frame (`radio/tests/esp-idf-link/`; the

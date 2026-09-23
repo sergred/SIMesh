@@ -411,6 +411,28 @@ def test_leaving_rx_before_a_frame_means_it_is_not_heard(ether):
     receiver.expect_nothing()
 
 
+def test_a_station_in_cad_senses_a_frame_but_is_never_told_how_it_ended(ether):
+    """CAD is energy, not reception: an rx_begin marked `cad`, and no rx_end,
+    so nothing is ruled on and nothing is recorded as received."""
+    sender, sensing = ether(1, 0), ether(2, NEAR_M)
+    sender.hello()
+    sensing.hello()
+    sensing.state("CAD")
+    time.sleep(0.05)
+
+    sender.tx(43, payload=b"is anyone there")
+    begin = sensing.expect("rx_begin")
+    assert begin["cad"] is True
+    assert begin["level"] == round(expected_level(NEAR_M))
+    assert begin["t_end"] - begin["t0"] == FRAME_US
+    sensing.expect_nothing(timeout=FRAME_US / 1e6 + 0.3)
+
+    time.sleep(0.2)             # the record is written as the ether goes
+    ends = [line for line in ether.record.read_text().splitlines()
+            if '"type":"rx_end"' in line]
+    assert ends == []
+
+
 def test_an_obstruction_puts_a_pair_out_of_earshot(ether):
     """The line of three: a wall between the outer pair, and nothing between
     either of them and the station in the middle."""

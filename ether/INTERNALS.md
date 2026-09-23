@@ -90,9 +90,18 @@ could learn; `welcome` already carries a seed for it.
 
 For each other station, for each of its slots: it must be placed and above its
 modem's sensitivity, it must not be transmitting itself, the slot must have last
-said `RX`, and its stated `freq`, `bw`, `sf` and `sync` must equal the
+said `RX` or `CAD`, and its stated `freq`, `bw`, `sf` and `sync` must equal the
 transmission's. That last list is one constant — the thing to extend when the
 medium learns to care about coding rate, header type or preamble length.
+
+A slot in `CAD` is sensing, not receiving. It must be told a frame is
+arriving, or a channel activity detection is blind to every frame that starts
+inside its window and carrier sense says the wrong thing exactly when two
+stations contend. It must not be told how the frame ended: it demodulated
+nothing, so there is no verdict to rule, and a reception recorded for it would
+draw a green flash for a station that only listened for energy. So its
+`rx_begin` carries `"cad": true` and no `rx_end` is scheduled; whether the
+slot was sensing is decided at the frame's start, from its last `state`.
 
 Matching is on the **last stated** values, not on anything the ether infers.
 This is why a station publishes a `state` on every command that changes its mode

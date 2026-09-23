@@ -20,7 +20,7 @@
  *  reaches it. */
 struct EtherState {
     int         slot;
-    const char* mode;        /* SLEEP | STDBY_RC | STDBY_XOSC | FS | TX | RX */
+    const char* mode;        /* SLEEP | STDBY_RC | STDBY_XOSC | FS | TX | RX | CAD */
     int64_t     readyAt;     /* when the mode transition completes, µs */
     uint32_t    freqHz;
     uint32_t    bwHz;

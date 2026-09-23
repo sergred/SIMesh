@@ -70,7 +70,13 @@ enum {
     IRQ_HEADER_VALID      = 1u << 4,
     IRQ_HEADER_ERR        = 1u << 5,
     IRQ_CRC_ERR           = 1u << 6,
+    IRQ_CAD_DONE          = 1u << 7,
+    IRQ_CAD_DETECTED      = 1u << 8,
 };
+
+/* SetCadParams' exit mode: back to standby, or straight into RX when
+ * something was found. */
+enum { CAD_ONLY = 0x00, CAD_RX = 0x01 };
 
 enum {
     REG_VERSION_STRING  = 0x0320,
@@ -191,6 +197,18 @@ struct ChipState {
     int      lockLevel = 0;
     int64_t  lockEndUs = 0;
 
+    /* When the last frame this antenna has been told of leaves the air. Not
+     * the chip's state but the air's, so no mode change clears it: a driver
+     * goes RX → standby → CAD, and the frame it was hearing is still in the
+     * air when the CAD looks. The medium tells a station about a frame only
+     * while it listens, so this holds the frames that began while it did. */
+    int64_t  heardEndUs = 0;
+
+    /* Channel activity detection, as SetCadParams left it. */
+    int      cadSymbols = 2;
+    uint8_t  cadDetPeak = 0, cadDetMin = 0;
+    uint8_t  cadExitMode = CAD_ONLY;
+
     int      txId = 0;
 
     VirtualRxEnd pendingEnd = {};
@@ -236,6 +254,7 @@ struct simradio {
     void* tTxDone = nullptr;
     void* tPre = nullptr;
     void* tHdr = nullptr;
+    void* tCad = nullptr;
 };
 
 namespace {
@@ -308,12 +327,10 @@ void stopTimer(void* h)
     if (h) S()->timer_stop(h);
 }
 
-/* Leaving RX abandons whatever was arriving. */
-void abandonReception(simradio* c)
+/* The demodulator lets go of the frame it was following. */
+void dropLock(simradio* c)
 {
     ChipState& d = c->st;
-    d.airLevel = 0;
-    d.airEndUs = 0;
     d.lockId = 0;
     d.lockEndUs = 0;
     d.pendingValid = false;
@@ -321,10 +338,21 @@ void abandonReception(simradio* c)
     stopTimer(c->tHdr);
 }
 
+/* Leaving RX for anything but CAD abandons whatever was arriving, the energy
+ * with it. CAD keeps the energy: a frame the receiver was following is still
+ * on the air, and it is what a CAD is for. */
+void abandonReception(simradio* c)
+{
+    c->st.airLevel = 0;
+    c->st.airEndUs = 0;
+    dropLock(c);
+}
+
 void txDoneCb(void* arg);
 void rxPreCb(void* arg);
 void rxHdrCb(void* arg);
 void rxEndCb(void* arg);
+void cadDoneCb(void* arg);
 
 }  // namespace
 
@@ -354,6 +382,7 @@ extern "C" simradio_t* simradio_open(int slot, void (*on_pin)(void*, int, int), 
         stopTimer(c->tTxDone);
         stopTimer(c->tPre);
         stopTimer(c->tHdr);
+        stopTimer(c->tCad);
         c->st = ChipState();
     }
     c->onPin = on_pin;
@@ -369,6 +398,7 @@ extern "C" void simradio_close(simradio_t* c)
     stopTimer(c->tTxDone);
     stopTimer(c->tPre);
     stopTimer(c->tHdr);
+    stopTimer(c->tCad);
     c->onPin = nullptr;
     c->ctx = nullptr;
     S()->unlock();
@@ -608,12 +638,32 @@ extern "C" void simradio_transfer(simradio_t* c, const uint8_t* out, size_t len,
     case CMD_SET_DIO2_RF_SWITCH:
     case CMD_SET_DIO3_TCXO:
     case CMD_STOP_TIMER_ON_PRE:
-    case CMD_SET_CAD_PARAMS:
-    case CMD_SET_CAD:
     case CMD_SET_LORA_SYMB_TO:
     case CMD_CLEAR_DEVICE_ERR:
     case CMD_RESET_STATS:
         break;
+
+    case CMD_SET_CAD_PARAMS:
+        if (len >= 5) {
+            /* cadSymbolNum 0x00..0x04 is 1, 2, 4, 8, 16 symbols; the timeout
+             * (bytes 5..7) only matters to CAD_RX's receive, which ends at
+             * the frame here. */
+            d.cadSymbols  = 1 << (out[1] > 4 ? 4 : out[1]);
+            d.cadDetPeak  = out[2];
+            d.cadDetMin   = out[3];
+            d.cadExitMode = out[4] == CAD_RX ? CAD_RX : CAD_ONLY;
+        }
+        break;
+
+    case CMD_SET_CAD: {
+        /* The datasheet reports RX in the status byte during CAD; the wire
+         * says CAD, which is what the medium delivers energy to. */
+        setMode(d, "CAD", ST_RX);
+        double tSym = (double)((uint32_t)1 << d.sf) / (double)d.bwHz;
+        armOnce(c, &c->tCad, cadDoneCb, (int64_t)(d.cadSymbols * tSym * 1e6));
+        publishState = true;
+        break;
+    }
 
     case CMD_SET_RXTX_FALLBACK:
         if (len >= 2) {
@@ -632,6 +682,12 @@ extern "C" void simradio_transfer(simradio_t* c, const uint8_t* out, size_t len,
 
     if (op == CMD_SET_STANDBY || op == CMD_SET_SLEEP || op == CMD_SET_FS || op == CMD_SET_TX)
         abandonReception(c);
+    if (op == CMD_SET_CAD)
+        dropLock(c);
+    /* Any other mode ends a CAD in progress without an answer. */
+    if (op == CMD_SET_STANDBY || op == CMD_SET_SLEEP || op == CMD_SET_FS ||
+        op == CMD_SET_TX || op == CMD_SET_RX)
+        stopTimer(c->tCad);
 
     if (publishState) fillState(c, snap);
     PinCall pin = dio1Of(c);
@@ -702,6 +758,25 @@ void rxEndCb(void* arg)
     if (bits) raise(c, bits);
 }
 
+/* The CAD window is over: done, and detected if energy is in the air at this
+ * antenna now. The chip then goes where SetCadParams said. */
+void cadDoneCb(void* arg)
+{
+    auto* c = (simradio*)arg;
+    ChipState& d = c->st;
+    EtherState s;
+    S()->lock();
+    if (strcmp(d.mode, "CAD") != 0) { S()->unlock(); return; }   /* ended by a command */
+    bool detected = S()->now_us() < d.heardEndUs;
+    uint16_t bits = IRQ_CAD_DONE | (detected ? IRQ_CAD_DETECTED : 0);
+    if (detected && d.cadExitMode == CAD_RX) setMode(d, "RX", ST_RX);
+    else                                     setMode(d, "STDBY_RC", ST_STDBY_RC);
+    fillState(c, s);
+    S()->unlock();
+    etherPublishState(s);
+    raise(c, bits);
+}
+
 }  // namespace
 
 /* ---- What the ether hands back ---- */
@@ -711,13 +786,20 @@ void modelRxBegin(simradio* c, const VirtualRxBegin& f)
     int64_t now = S()->now_us();
     S()->lock();
     ChipState& d = c->st;
-    if (strcmp(d.mode, "RX") != 0) { S()->unlock(); return; }
+    bool rx = strcmp(d.mode, "RX") == 0;
+    bool cad = strcmp(d.mode, "CAD") == 0;
+    if (!rx && !cad) { S()->unlock(); return; }
 
     /* Energy first: every frame in the air raises the instantaneous reading,
      * whether or not this receiver is following it. */
+    int64_t endUs = now + (f.tEnd - f.t0);
     if (now >= d.airEndUs) d.airLevel = 0;
     if (f.levelDbm > d.airLevel || d.airLevel == 0) d.airLevel = f.levelDbm;
-    if (now + (f.tEnd - f.t0) > d.airEndUs) d.airEndUs = now + (f.tEnd - f.t0);
+    if (endUs > d.airEndUs) d.airEndUs = endUs;
+    if (endUs > d.heardEndUs) d.heardEndUs = endUs;
+
+    /* A CAD senses; it demodulates nothing. */
+    if (cad) { S()->unlock(); return; }
 
     /* Then the demodulator, which follows one frame at a time. A frame that
      * starts while another is being demodulated is not received at all unless

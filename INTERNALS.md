@@ -322,11 +322,11 @@ and unaware.
 
 The model is deliberately shallow where depth would buy nothing: mode
 transitions are instantaneous, BUSY is never busy, and the GFSK and LR-FHSS
-modems, CAD and duty-cycled receive are refused. A `ready_at` field rides on
+modems and duty-cycled receive are refused. A `ready_at` field rides on
 the wire from the start so the datasheet's timing table can be added later
 without moving anything else.
 
-Two things it is **not** shallow about, because everything above the bus
+Three things it is **not** shallow about, because everything above the bus
 reads them:
 
 - **A frame takes its time on the air.** The transmit timeline is the
@@ -342,6 +342,48 @@ reads them:
   what it had and takes the louder one. Without that the driver would be
   handed whichever frame ended last, and the medium's verdict — which says
   one of the two survived — would mean nothing above the bus.
+- **Channel activity detection answers.** `SetCad` runs for the symbols
+  `SetCadParams` named, then raises `CAD_DONE`, with `CAD_DETECTED` when a
+  frame this antenna has been told of is still on the air. A driver whose
+  carrier sense is CAD waits for that answer and treats silence as a busy
+  channel, so a model that accepted `SetCad` and never answered would make
+  every transmission of such a driver fail seconds late, and it would look
+  like a dead radio.
+
+## The chip library, and the rules it keeps
+
+The model and its ether link are one C++ library behind a C ABI
+(`radio/include/simradio.h`), reaching the host only through a table of
+services (`radio/src/services.h`). A station of any language links it. Each
+rule below is a way the model breaks when a backend or a caller gets it wrong.
+
+**The lock is recursive.** A timer callback takes the lock, and what it calls
+can take it again; a plain mutex deadlocks on the first received frame.
+
+**Pin callbacks and timer callbacks run with the lock released.** A host's
+DIO1 callback may run a driver's interrupt handler on the spot, and that
+handler issues SPI commands, each of which takes the lock. So the model
+decides the line's level under the lock and calls the host after letting go,
+and a backend's timer thread holds nothing when it calls in.
+
+**Starting a timer that is running restarts it.** The receive timers are
+re-armed for every frame; a start that was refused because the timer was
+already armed would fire on the previous frame's schedule.
+
+**The air is the antenna's, not the mode's.** What a CAD detects is any frame
+this antenna was told of that has not yet left the air, whatever the chip did
+in between: a driver goes RX, then standby, then CAD, and the frame it was
+hearing is still there when the CAD looks. What the demodulator and the
+instantaneous RSSI read is cleared on leaving RX, as a chip clears it.
+
+**The medium tells a station in CAD about a frame, never how it ended.** A
+CAD needs to learn of frames that start inside its window, or carrier sense
+is blind exactly when two stations contend; a CAD demodulates nothing, so an
+`rx_end` for it would be a reception that never happened.
+
+**Close detaches, it does not free.** A slot's chip lives for the process,
+because a timer may be about to fire on it; `simradio_close` stops its timers
+and drops the host's callback, and opening the slot again powers it up fresh.
 
 ## Time
 
@@ -399,7 +441,7 @@ with the interface that drives it rather than with the board that wires it.
 - Memory: the heap ignores capabilities and wraps libc, so PSRAM pressure,
   DMA-capable allocation and internal-RAM exhaustion are all invisible.
 - The radio's physics below the path-loss model. There is no fading, no
-  antenna pattern, no per-spreading-factor sensitivity threshold and no noise
+  antenna pattern, no CRC band above the sensitivity threshold and no noise
   that varies with what else is in the air; a level is computed once from the
   geometry and is the same for every frame between one pair. See
   [`ether/INTERNALS.md`](ether/INTERNALS.md) for what the medium does

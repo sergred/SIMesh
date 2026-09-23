@@ -46,7 +46,13 @@ the level above the floor.
 
 A frame is heard by a station within that range whose radio last said it was
 **receiving** on the same **carrier, bandwidth, spreading factor and sync
-word**.
+word**. A station whose radio last said it was in **CAD** (channel activity
+detection) on that carrier is told the frame is arriving and nothing more:
+it is sensing energy, so it gets an `rx_begin` marked `"cad": true` and no
+`rx_end`, and no reception is recorded for it.
+
+The ether does not match on preamble length: two radios whose preambles
+differ hear each other here, and may not on a bench.
 
 Two frames that share a carrier and any instant of air interfere, and **each
 receiver rules on them for itself**: a frame survives where it leads everything
@@ -114,7 +120,7 @@ Positions are not on it in either direction: a station never learns where it is.
 | Message | Says |
 |---|---|
 | `welcome` | joined; the ether's clock origin, its seed, and that it runs in real time |
-| `rx_begin` | a frame is arriving: when its preamble, header and end fall, and how strongly |
+| `rx_begin` | a frame is arriving: when its preamble, header and end fall, and how strongly; `"cad": true` when the station is in CAD and no end will follow |
 | `rx_end` | that frame is over: the verdict, the payload, RSSI and SNR |
 
 A station's `t` fields are its own clock and mean something only against each
