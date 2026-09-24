@@ -9,8 +9,9 @@ ran (`run/scenario.yaml`) afterwards and says:
   allows, over the busiest window of the run;
 - **carrier sense**: every transmission that started while a frame the sender
   could hear was on the air, split by whether the ether had told the sender
-  about that frame (it tells a station only at a frame's start, and only if it
-  was listening then) and by how long the frame had been on the air;
+  about that frame (at its start, if the sender was listening then; later, as
+  `energy`, if it began listening while the frame was on the air) and by how
+  long the frame had been on the air;
 - **collisions**: receptions spoiled, and which of them had a hidden sender;
 - **the unheard**: frames nobody received, grouped by where they were sent,
   which is how a station on the wrong channel shows up.
@@ -46,9 +47,15 @@ BANDS = [
     (869_700_000, 870_000_000, 10, "g4"),
 ]
 
-# A frame on the air for less than this cannot be sensed yet: a LoRa receiver
-# needs a few symbols of preamble. The bench measured about 4 ms at SF7.
-BLIND_S = 0.004
+# A frame on the air for less than this many of its own symbols cannot be
+# sensed yet: a LoRa receiver needs a few symbols of preamble to find it. The
+# bench measured about 4 ms at SF7 and 125 kHz, which is four symbols.
+BLIND_SYMBOLS = 4
+
+
+def blind_s(frame):
+    """How long a frame is on the air before a receiver can find it."""
+    return BLIND_SYMBOLS * (1 << (frame.sf or 7)) / float(frame.bw or 125_000)
 
 
 def band_of(freq):
@@ -64,7 +71,7 @@ def stamp(text):
 
 class Frame:
     __slots__ = ("sid", "fid", "start", "pre", "end", "freq", "bw", "sf", "sync",
-                 "power", "size", "told", "heard", "eid")
+                 "power", "size", "told", "told_late", "heard", "eid")
 
     def __init__(self, sid, msg, start):
         self.sid = sid
@@ -81,6 +88,7 @@ class Frame:
         self.power = msg.get("power_dbm", ether_module.DEFAULT_POWER_DBM)
         self.size = (len(msg.get("payload", "")) * 3) // 4
         self.told = set()       # stations the ether told, by rx_begin
+        self.told_late = set()  # stations that began listening mid-frame: `energy`
         self.heard = {}         # station -> verdict at its rx_end
         self.eid = None
 
@@ -90,6 +98,7 @@ def read_record(path):
     frames = []
     begins = []                 # (stamp, receiver sid, msg)
     ends = []
+    energies = []
     states = collections.defaultdict(list)
     first = last = None
     with open(path, encoding="utf-8") as handle:
@@ -117,10 +126,12 @@ def read_record(path):
                 begins.append((t, sid, msg))
             elif direction == "out" and kind == "rx_end":
                 ends.append((t, sid, msg))
-    return frames, begins, ends, states, first, last
+            elif direction == "out" and kind == "energy":
+                energies.append((t, sid, msg))
+    return frames, begins, ends, states, first, last, energies
 
 
-def match_receptions(frames, begins, ends):
+def match_receptions(frames, begins, ends, energies=()):
     """Tie each rx_begin to the frame it announced, by timing and carrier.
 
     The ether numbers frames itself and the transmitter's `tx` does not carry
@@ -150,6 +161,28 @@ def match_receptions(frames, begins, ends):
         frame = by_eid.get(msg.get("id"))
         if frame is not None:
             frame.heard[rsid] = msg.get("verdict")
+    # An `energy` names the frame by the ether's number too, but nobody may
+    # have had an rx_begin for it: match those by where the frame ends.
+    for t, rsid, msg in energies:
+        eid = msg.get("id")
+        frame = by_eid.get(eid)
+        if frame is None:
+            ends_at = t + (int(msg.get("t_end", 0)) - int(msg.get("t0", 0))) / 1e6
+            i = bisect.bisect_right(starts, t) - 1
+            best = None
+            while i >= 0 and t - frames[i].start < 120:
+                cand = frames[i]
+                i -= 1
+                if cand.eid not in (None, eid) or not cand.start <= t <= cand.end:
+                    continue
+                miss = abs(cand.end - ends_at)
+                if miss < 0.005 and (best is None or miss < best[0]):
+                    best = (miss, cand)
+            if best is not None:
+                frame = by_eid[eid] = best[1]
+                frame.eid = eid
+        if frame is not None:
+            frame.told_late.add(rsid)
 
 
 def build_air(scenario_path):
@@ -239,7 +272,8 @@ def judge(frames, states, air, window_s, duration):
                 "sid": f.sid, "over": g.sid, "at": round(f.start, 3),
                 "on_air_ms": round(1000 * age, 1), "level_dbm": round(level, 1),
                 "told": f.sid in g.told,
-                "window": "blind" if age < BLIND_S else "preamble"
+                "told_late": f.sid in g.told_late,
+                "window": "blind" if age < blind_s(g) else "preamble"
                 if f.start < g.pre else "payload",
             })
 
@@ -288,8 +322,8 @@ def main(argv=None):
 
     record = os.path.join(args.run, "record.tsv")
     scenario = os.path.join(args.run, "scenario.yaml")
-    frames, begins, ends, states, first, last = read_record(record)
-    match_receptions(frames, begins, ends)
+    frames, begins, ends, states, first, last, energies = read_record(record)
+    match_receptions(frames, begins, ends, energies)
     air = build_air(scenario)
     names = names_of(scenario)
     duration = (last - first) if first is not None else 0.0
@@ -314,16 +348,21 @@ def main(argv=None):
             d["share_permille"] or 0, d["budget_permille"], flag))
     cs = report["carrier_sense"]
     print("\ncarrier sense: %d transmissions began over an audible frame" % len(cs))
-    by = collections.Counter((c["sid"], c["told"], c["window"]) for c in cs)
+    def how(c):
+        if c["told"]:
+            return "(told of it)"
+        if c.get("told_late"):
+            return "(told late: began listening while it was on the air)"
+        return "(never told: not listening while it was on the air)"
+
+    by = collections.Counter((c["sid"], how(c), c["window"]) for c in cs)
     for (sid, told, window), n in sorted(by.items()):
-        print("  %-24s %4d  over a frame in its %-8s %s" % (
-            who(sid), n, window,
-            "(told of it)" if told else "(never told: not listening when it began)"))
+        print("  %-24s %4d  over a frame in its %-8s %s" % (who(sid), n, window, told))
     if args.detail:
         for c in cs:
             print("    %s at %.3f over %s: on the air %.1f ms, %.1f dBm, %s" % (
                 who(c["sid"]), c["at"] - (first or 0), who(c["over"]), c["on_air_ms"],
-                c["level_dbm"], "told" if c["told"] else "never told"))
+                c["level_dbm"], how(c)[1:-1]))
     print("\nunheard frames (nobody was told):")
     for u in report["unheard"]:
         print("  %-24s %4d frames on %s Hz sf%s bw%s" % (
