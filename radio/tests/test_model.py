@@ -345,31 +345,36 @@ def test_rx_begin_raises_preamble_and_header_then_rx_end_delivers(chip):
     assert snr == 28                              # 4 x 7
 
 
-def test_packet_status_reads_a_level_past_a_register_end_as_that_end(chip):
+def test_snr_reads_no_more_than_a_lora_receiver_reports(chip):
     chip.configure()
     chip.write(SET_RX, 0xFF, 0xFF, 0xFF)
     settle()
 
-    # 50 m away at +14 dBm: -63 dBm, 54 dB over the noise. SNR is x/4 in a
-    # signed byte, so +31.75 dB is the most it can say.
+    # 50 m away at +14 dBm: -63 dBm, 54 dB over the noise. The estimate
+    # saturates a little above 10 dB, so the link reads +12 dB.
     chip.ether.rx_begin(111, -63, 10_000, 20_000, 50_000)
     chip.wait_irq(HEADER_VALID)
     chip.ether.rx_end(111, b"near", rssi=-63, snr=54)
     chip.wait_irq(RX_DONE)
     rssi, snr, signal = chip.read(GET_PACKET_STATUS, 3)
     assert rssi == 126 and signal == 126          # -2 x -63
-    assert snr == 127                             # +31.75 dB, not 216: -10 dB
+    assert snr == 48                              # 4 x 12, not 216: -10 dB
+
+
+def test_packet_rssi_reads_a_level_under_the_register_as_its_end(chip):
+    chip.configure()
+    chip.write(SET_RX, 0xFF, 0xFF, 0xFF)
+    settle()
 
     # As faint as SF12 hears: -135 dBm. RSSI is -x/2 in an unsigned byte, so
     # -127.5 dBm is the least it can say.
-    chip.clear_irq()
     chip.ether.rx_begin(112, -135, 10_000, 20_000, 50_000)
     chip.wait_irq(HEADER_VALID)
     chip.ether.rx_end(112, b"far", rssi=-135, snr=-18)
     chip.wait_irq(RX_DONE)
     rssi, snr, signal = chip.read(GET_PACKET_STATUS, 3)
     assert rssi == 255 and signal == 255          # -127.5 dBm, not 270: -7 dBm
-    assert snr == (-18 * 4) & 0xFF                # inside the range, unchanged
+    assert snr == (-18 * 4) & 0xFF                # under the ceiling, unchanged
 
 
 def test_rx_end_with_a_crc_verdict_raises_crc_err(chip):
