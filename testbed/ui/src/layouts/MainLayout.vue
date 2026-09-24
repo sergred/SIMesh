@@ -188,6 +188,8 @@
                    outlined dense label="Shadowing seed" />
           <q-select class="col" v-model="physics.capture_model" :options="['margin', 'bench']"
                     outlined dense label="Capture" hint="bench: as measured" />
+          <q-select class="col" v-model="physics.sf_orthogonality" :options="['none', 'croce']"
+                    outlined dense label="Other SFs" hint="croce: measured SIR" />
         </q-card-section>
         <q-card-section>
           <div class="text-caption text-grey-6 q-mb-sm">
@@ -234,7 +236,8 @@ watch(kinds, (list) => {
 const waiting = ref(false)
 const setupDraft = ref('')
 const physics = reactive({ exponent: 2.7, noise_figure_db: 6, capture_db: 6,
-                           shadowing_db: 0, shadowing_seed: 0, capture_model: 'margin' })
+                           shadowing_db: 0, shadowing_seed: 0, capture_model: 'margin',
+                           sf_orthogonality: 'none' })
 
 sim.connect()
 

@@ -235,9 +235,13 @@ medium: the ether's job is the frames, and everything watching is optional.
   where a frame locks but fails its CRC at a probability. `welcome` already
   carries a `seed` so that band, when it arrives, has a reproducible generator
   to draw from.
-- **Orthogonality.** Two frames on one carrier interfere whatever their
-  spreading factors, though a real receiver can often demodulate through a
-  frame at another SF. The medium is pessimistic here, and knowingly.
+- **Orthogonality, by default.** Two frames on one carrier interfere whatever
+  their spreading factors, though a real receiver can often demodulate through
+  a frame at another SF. The medium is pessimistic here, and knowingly, unless
+  a scenario asks for `sf_orthogonality: croce`: then a frame at another
+  spreading factor spoils it only when it leads by more than a table measured
+  with an SX1272 allows (Croce et al., 2018, Table II). SF5 and SF6 were not
+  measured, and pairs involving them stay pessimistic.
 - **A referee.** The ether does not judge a station's behaviour — it does not
   check that a transmission was preceded by carrier sense, or that a duty cycle
   was respected. The record is there so something else can.

@@ -140,6 +140,18 @@ def test_a_link_without_a_loss_is_refused(tmp_path):
         scenario_module.read(write(tmp_path, text))
 
 
+def test_sf_orthogonality_is_written_only_when_asked_for_and_checked(tmp_path):
+    data = scenario_module.read(write(tmp_path, MIXED))
+    assert "sf_orthogonality" not in scenario_module.dump(data)
+    data["physics"]["sf_orthogonality"] = "croce"
+    text = scenario_module.dump(data)
+    assert 'sf_orthogonality: "croce"' in text
+    assert scenario_module.read(write(tmp_path, text, "again.yaml")) == data
+    sc = scenario_module.Scenario("mixed", data, run_dir=str(tmp_path / "run"))
+    with pytest.raises(scenario_module.ScenarioError):
+        sc.set_physics({"sf_orthogonality": "perfect"})
+
+
 def test_scenario_setup_goes_to_the_first_kind_only(tmp_path):
     data = scenario_module.read(write(tmp_path, MIXED))
     sc = scenario_module.Scenario("mixed", data, run_dir=str(tmp_path / "run"))

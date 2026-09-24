@@ -31,7 +31,8 @@ export interface Scenario {
   dirty: boolean
   origin: [number, number]
   physics: { exponent: number; noise_figure_db: number; capture_db: number;
-             shadowing_db?: number; shadowing_seed?: number; capture_model?: string }
+             shadowing_db?: number; shadowing_seed?: number; capture_model?: string;
+             sf_orthogonality?: string }
   setup: string[]
   /** The scenario's station kinds, the default first. */
   kinds: string[]

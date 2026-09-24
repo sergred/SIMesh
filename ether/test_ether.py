@@ -808,6 +808,38 @@ def test_a_link_is_the_same_both_ways_and_an_obstruction_still_adds(ether):
     assert a.expect("rx_begin")["level"] == POWER_DBM - 120
 
 
+def other_sf_pair(ether, sf_a, sf_b, a_m, b_m, orthogonality):
+    """a at SF a and b at SF b transmit together; one listener per SF."""
+    if orthogonality:
+        ether.physics = {"sf_orthogonality": "croce"}
+    ether.obstruct(1, 2, WALL_DB)
+    a, b = ether(1, a_m), ether(2, b_m)
+    ra, rb = ether(3, 0), ether(4, 0)
+    for station in (a, b, ra, rb):
+        station.hello()
+    ra.state("RX", sf=sf_a)
+    rb.state("RX", sf=sf_b)
+    time.sleep(0.1)
+    a.tx(201, payload=b"from a", sf=sf_a)
+    b.tx(202, payload=b"from b", sf=sf_b)
+    return ra.expect("rx_end")["verdict"], rb.expect("rx_end")["verdict"]
+
+
+def test_frames_at_two_spreading_factors_spoil_each_other_by_default(ether):
+    assert other_sf_pair(ether, 9, 10, FAR_M, -FAR_M, False) == ("crc", "crc")
+
+
+def test_croces_table_lets_frames_at_two_spreading_factors_both_through(ether):
+    """Equal levels: SF9 under SF10 by 0 dB, well inside its -13 dB."""
+    assert other_sf_pair(ether, 9, 10, FAR_M, -FAR_M, True) == ("clean", "clean")
+
+
+def test_croces_table_still_spoils_a_frame_far_under_the_other(ether):
+    """The SF10 sender is 16 times nearer: 32.5 dB up at the listeners,
+    past what either table entry allows."""
+    assert other_sf_pair(ether, 9, 10, 16 * NEAR_M, -NEAR_M, True) == ("crc", "clean")
+
+
 def test_a_station_that_was_never_placed_hears_nothing(ether):
     """Position is the whole of a station's presence in the medium: one that
     has none is not on the plane, and no distance to it exists."""
