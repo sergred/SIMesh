@@ -186,6 +186,8 @@
                    outlined dense label="Shadowing spread (dB)" hint="0 is none" />
           <q-input class="col" v-model.number="physics.shadowing_seed" type="number" step="1"
                    outlined dense label="Shadowing seed" />
+          <q-select class="col" v-model="physics.capture_model" :options="['margin', 'bench']"
+                    outlined dense label="Capture" hint="bench: as measured" />
         </q-card-section>
         <q-card-section>
           <div class="text-caption text-grey-6 q-mb-sm">
@@ -232,7 +234,7 @@ watch(kinds, (list) => {
 const waiting = ref(false)
 const setupDraft = ref('')
 const physics = reactive({ exponent: 2.7, noise_figure_db: 6, capture_db: 6,
-                           shadowing_db: 0, shadowing_seed: 0 })
+                           shadowing_db: 0, shadowing_seed: 0, capture_model: 'margin' })
 
 sim.connect()
 

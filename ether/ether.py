@@ -69,6 +69,22 @@ DEFAULT_CAPTURE_DB = 6      # how far a frame must lead an interferer to survive
 DEFAULT_POWER_DBM = 14      # a `tx` that did not say what it was sent at
 DEFAULT_SHADOWING_DB = 0.0  # the spread of a pair's shadowing draw; 0 is none
 DEFAULT_SHADOWING_SEED = 0  # which draws: the same seed is the same ground
+DEFAULT_CAPTURE_MODEL = "margin"   # or "bench": capture as a bench measured it
+CAPTURE_MODELS = ("margin", "bench")
+
+# Capture as a bench measured it: an SX1262 listening, an SX1262 and an LR2021
+# sending, SF7 at 125 kHz, 289 collisions of two frames that started within
+# 8 ms of each other (the reticulum project's tools/rncapture, 2026-09-17).
+# Within 1.2 dB the two are equals: both were lost 9 times in 39, and otherwise
+# one of them survived, either one. From there to 2.7 dB the stronger survived
+# 119 times in 136, and from 6.1 dB every time; the straight line between is
+# an assumption. The weaker never survived. Other spreading factors are
+# assumed to behave the same.
+BENCH_EQUAL_DB = 1.2
+BENCH_BOTH_LOST = 9 / 39
+BENCH_STRONGER = 119 / 136
+BENCH_STRONGER_DB = 2.7
+BENCH_CERTAIN_DB = 6.1
 
 # The SNR a spreading factor needs before its receiver detects a preamble at
 # all, from the SX1262 datasheet: -2.5 dB at SF5 and 2.5 dB lower per step. A
@@ -147,6 +163,60 @@ def shadowing_unit(seed, a, b):
     return math.sqrt(-2.0 * math.log(u1)) * math.cos(2.0 * math.pi * u2)
 
 
+def pair_draw(seed, eid_a, eid_b, rsid, what):
+    """A uniform draw in [0, 1) for two frames at one receiver.
+
+    The same whichever of the two frames asks, so the verdicts on both and the
+    `takes` the receiver was told all read one outcome.
+    """
+    lo, hi = (eid_a, eid_b) if eid_a <= eid_b else (eid_b, eid_a)
+    digest = hashlib.sha256(
+        ("%d:%d:%d:%d:%s" % (seed, lo, hi, rsid, what)).encode()).digest()
+    return int.from_bytes(digest[:8], "big") / 2.0 ** 64
+
+
+def bench_stronger_odds(lead):
+    """How often the stronger of two frames that met survives, by its lead."""
+    if lead >= BENCH_CERTAIN_DB:
+        return 1.0
+    if lead <= BENCH_STRONGER_DB:
+        return BENCH_STRONGER
+    return BENCH_STRONGER + (1.0 - BENCH_STRONGER) * (
+        (lead - BENCH_STRONGER_DB) / (BENCH_CERTAIN_DB - BENCH_STRONGER_DB))
+
+
+def bench_outcome(seed, first, second, rsid, lead, locked):
+    """Which of two frames that met survive at one receiver, as the bench saw.
+
+    `first` and `second` are the frames' numbers in the order they started;
+    `lead` is the first's level over the second's at the receiver, in dB. The
+    answer is (the first survives, the second survives).
+
+    A receiver `locked` on the first, which was following it when the second
+    started after its preamble, never receives the second, however strong,
+    and loses the first too unless the first is the stronger: the bench saw a
+    frame 2 dB stronger landing 30 ms in spoil both, six times in six. Frames
+    that started within a preamble of each other are the bench's table.
+    """
+    def draw(what):
+        return pair_draw(seed, first, second, rsid, what)
+
+    if locked:
+        if lead > BENCH_EQUAL_DB:
+            return draw("stronger") < bench_stronger_odds(lead), False
+        if lead < -BENCH_EQUAL_DB:
+            return False, False
+        return draw("equal") >= BENCH_BOTH_LOST, False
+    if abs(lead) <= BENCH_EQUAL_DB:
+        if draw("equal") < BENCH_BOTH_LOST:
+            return False, False
+        first_wins = draw("coin") < 0.5
+        return first_wins, not first_wins
+    if lead > 0:
+        return draw("stronger") < bench_stronger_odds(lead), False
+    return False, draw("stronger") < bench_stronger_odds(-lead)
+
+
 class Physics:
     """The scenario's constants: how fast the air eats a signal, and the noise."""
 
@@ -154,16 +224,25 @@ class Physics:
                  noise_figure_db=DEFAULT_NOISE_FIGURE_DB,
                  capture_db=DEFAULT_CAPTURE_DB,
                  shadowing_db=DEFAULT_SHADOWING_DB,
-                 shadowing_seed=DEFAULT_SHADOWING_SEED):
+                 shadowing_seed=DEFAULT_SHADOWING_SEED,
+                 capture_model=DEFAULT_CAPTURE_MODEL):
         self.exponent = float(exponent)
         self.noise_figure_db = float(noise_figure_db)
         self.capture_db = float(capture_db)
         self.shadowing_db = float(shadowing_db)
         self.shadowing_seed = int(shadowing_seed)
+        if capture_model not in CAPTURE_MODELS:
+            raise ValueError("capture_model is one of %s, not %r"
+                             % (", ".join(CAPTURE_MODELS), capture_model))
+        self.capture_model = capture_model
 
     def describe(self):
-        text = "exponent %.2f, noise figure %.1f dB, capture margin %.1f dB" % (
-            self.exponent, self.noise_figure_db, self.capture_db)
+        if self.capture_model == "bench":
+            capture = "capture as the bench measured it"
+        else:
+            capture = "capture margin %.1f dB" % self.capture_db
+        text = "exponent %.2f, noise figure %.1f dB, %s" % (
+            self.exponent, self.noise_figure_db, capture)
         if self.shadowing_db:
             text += ", shadowing %.1f dB (seed %d)" % (self.shadowing_db,
                                                       self.shadowing_seed)
@@ -176,14 +255,16 @@ class Physics:
                    data.get("noise_figure_db", DEFAULT_NOISE_FIGURE_DB),
                    data.get("capture_db", DEFAULT_CAPTURE_DB),
                    data.get("shadowing_db", DEFAULT_SHADOWING_DB),
-                   data.get("shadowing_seed", DEFAULT_SHADOWING_SEED))
+                   data.get("shadowing_seed", DEFAULT_SHADOWING_SEED),
+                   data.get("capture_model", DEFAULT_CAPTURE_MODEL))
 
     def as_dict(self):
         return {"exponent": self.exponent,
                 "noise_figure_db": self.noise_figure_db,
                 "capture_db": self.capture_db,
                 "shadowing_db": self.shadowing_db,
-                "shadowing_seed": self.shadowing_seed}
+                "shadowing_seed": self.shadowing_seed,
+                "capture_model": self.capture_model}
 
 
 class Placement:
@@ -548,17 +629,29 @@ class Ether(asyncio.DatagramProtocol):
 
         A demodulator follows one frame at a time. A receiver following nothing
         takes the frame that reaches it; one already following a frame keeps it
-        unless the new frame leads it there by the capture margin. The ether
-        says so in the `rx_begin`, because it is the ether that rules on which
-        of the two survives: a chip deciding at a margin of its own would hand
-        up a frame the medium had spoiled, or drop one it had kept.
+        unless the new frame would win the pair, by the rule the verdict
+        applies. The ether says so in the `rx_begin`, because it is the ether
+        that rules on which of the two survives: a chip deciding at a margin of
+        its own would hand up a frame the medium had spoiled, or drop one it had
+        kept.
         """
         held = self.locks.get((rsid, slot))
-        if (held is not None and held[0].end_us > now
-                and level - held[1] < self.physics.capture_db):
-            return False
+        if held is not None and held[0].end_us > now:
+            if self.physics.capture_model == "bench":
+                takes = self.bench_pair(held[0], frame, rsid, held[1] - level)[1]
+            else:
+                takes = level - held[1] >= self.physics.capture_db
+            if not takes:
+                return False
         self.locks[(rsid, slot)] = (frame, level)
         return True
+
+    def bench_pair(self, first, second, rsid, lead):
+        """`bench_outcome` for two frames in flight: whether the receiver was
+        locked on the first when the second started after its preamble."""
+        locked = (second.start_us >= first.pre_us
+                  and any(r[0] == rsid for r in first.receivers))
+        return bench_outcome(self.seed, first.eid, second.eid, rsid, lead, locked)
 
     # ---- delivery -------------------------------------------------------
 
@@ -568,13 +661,22 @@ class Ether(asyncio.DatagramProtocol):
         Everything this station could hear on the carrier at the same instant
         is interference. The frame survives only by leading all of it by the
         capture margin — so a receiver near one transmitter keeps its frame
-        while a receiver that hears both equally keeps neither.
+        while a receiver that hears both equally keeps neither. With
+        `capture_model: bench` it must instead survive each pair as the bench
+        saw it (`bench_outcome`).
         """
         for other in frame.interferers:
             against = self.level(other.sid, rsid, other.freq, other.power_dbm)
             if not self.audible(against, other.bw, other.sf):
                 continue        # this receiver never heard the other frame
-            if level - against < self.physics.capture_db:
+            if self.physics.capture_model == "bench":
+                if (other.start_us, other.eid) < (frame.start_us, frame.eid):
+                    survives = self.bench_pair(other, frame, rsid, against - level)[1]
+                else:
+                    survives = self.bench_pair(frame, other, rsid, level - against)[0]
+                if not survives:
+                    return "crc"
+            elif level - against < self.physics.capture_db:
                 return "crc"
         return "clean"
 
@@ -638,10 +740,10 @@ def read_scenario(path):
     return physics, places, obstructions
 
 
-async def serve(bind, record_path, physics, places, obstructions):
+async def serve(bind, record_path, physics, places, obstructions, seed=None):
     loop = asyncio.get_running_loop()
     transport, ether = await loop.create_datagram_endpoint(
-        lambda: Ether(record_path, physics), local_addr=bind)
+        lambda: Ether(record_path, physics, seed), local_addr=bind)
     for sid, (x, y, gain) in places.items():
         ether.place(sid, x, y, gain)
     for a, b, db in obstructions:
@@ -669,13 +771,15 @@ def main(argv=None):
     ap.add_argument("--scenario", metavar="PATH",
                     help="a scenario directory or scenario.yaml: where the "
                          "stations stand (default: nowhere, so nothing is heard)")
+    ap.add_argument("--seed", type=int, default=None,
+                    help="the seed of the medium's draws (default: a fresh one)")
     args = ap.parse_args(argv)
     physics, places, obstructions = Physics(), {}, []
     if args.scenario:
         physics, places, obstructions = read_scenario(args.scenario)
     try:
         asyncio.run(serve(parse_bind(args.bind), args.record,
-                          physics, places, obstructions))
+                          physics, places, obstructions, args.seed))
     except KeyboardInterrupt:
         log("ether stopping")
     return 0

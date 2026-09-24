@@ -149,6 +149,18 @@ been pruned still knows what spoiled it. Scheduling an `rx_end` does not settle
 it: a frame still in the air when a second one starts is spoiled retroactively
 for receivers already told it was arriving, which is exactly what a radio does.
 
+`capture_model: bench` swaps the margin for what a bench measured: the
+reticulum project's tools/rncapture, with an SX1262 listening to an SX1262 and
+an LR2021, SF7 at 125 kHz, 289 collisions. Its table is for frames that start
+within one preamble of each other. Its one finding past that, six frames about
+2 dB stronger landing 30 ms into a frame the listener had locked on to and
+spoiling both, is extended to every later frame: the listener stays on what it
+has and receives nothing else. The straight line between 2.7 and 6.1 dB is an
+assumption, and so is every spreading factor but 7. Each pair is judged once,
+from a draw keyed to the ether's seed, the two frames and the receiver, so the
+verdict on either frame and the `takes` the receiver was told read the same
+outcome.
+
 An interferer's level is recomputed at the verdict rather than remembered from
 when it was delivered. A station can be dragged across the map while two frames
 are in the air, and the answer that matters is where it was when the reception
@@ -161,8 +173,9 @@ receiver already following one, the chip needs to know whether it takes the
 receiver or goes unheard. That is the question of which of the two survives,
 and the ether answers it with the same rule: `rx_begin` carries `takes`. A
 receiver following nothing takes the frame that reaches it; one following a
-frame keeps it unless the new frame leads it there by the capture margin, the
-margin the verdict applies. The ether keeps its own note of what each receiver
+frame keeps it unless the new frame would win the pair by the rule the verdict
+applies: the capture margin, or the bench's table. The ether keeps its own note
+of what each receiver
 follows, from the `rx_begin`s it sent and the states it was told, and a
 receiver that leaves `RX` lets go. A chip that decided for itself at a margin of
 its own would hand up a frame the medium had spoiled, or drop one it had kept,

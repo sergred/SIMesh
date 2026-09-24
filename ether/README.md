@@ -68,6 +68,16 @@ else that station could hear at the same instant by the **capture margin** of
 transmitters keeps its neighbour's frame, while a station that hears both
 equally keeps neither, out of the same collision.
 
+With `capture_model: bench` in the scenario's `physics:`, capture is instead
+what a bench measured: an SX1262 listening, SF7 at 125 kHz, 289 collisions.
+Two frames that start within one preamble of each other are equals within
+1.2 dB, and then both are lost one time in four and otherwise one of them
+survives; past that the stronger survives about nine times in ten, and from
+6.1 dB always, and the weaker never. A frame that starts after the preamble of
+one a receiver is already following is never received there, however strong,
+and it spoils the first unless the first is the stronger. The draws come from
+the ether's seed, which a run alone takes as `--seed`.
+
 A station is deaf while its own frame is going out — the radio is half duplex —
 which is what makes a hidden terminal behave like one: two stations that cannot
 hear each other do not defer to each other either.
