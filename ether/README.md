@@ -93,8 +93,14 @@ A station is deaf while its own frame is going out — the radio is half duplex 
 which is what makes a hidden terminal behave like one: two stations that cannot
 hear each other do not defer to each other either.
 
-Absent at this depth: fading, the CRC band just above the sensitivity threshold,
-noise that varies with what else is in the air, and a referee. A level is
+With `crc_band_db` in `physics:`, a frame that clears its spreading factor's
+threshold by less than that many dB is received and then fails its CRC at a
+chance that falls in a straight line from certain, at the threshold, to nothing
+at the top of the band: one draw per frame and receiver, from the ether's seed.
+A link at the edge of range then flickers instead of standing still.
+
+Absent at this depth: fading, noise that varies with what else is in the air,
+and a referee. A level is
 computed once, from the geometry and the pair's shadowing, and does not change
 from one frame to the next.
 

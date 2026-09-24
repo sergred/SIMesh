@@ -840,6 +840,31 @@ def test_croces_table_still_spoils_a_frame_far_under_the_other(ether):
     assert other_sf_pair(ether, 9, 10, 16 * NEAR_M, -NEAR_M, True) == ("crc", "clean")
 
 
+def test_the_crc_band_fails_frames_in_proportion_to_how_near_the_threshold_they_are():
+    fails = ether_module.crc_band_fails
+    for margin, expected in ((0.0, 1.0), (1.0, 2 / 3), (2.0, 1 / 3), (3.0, 0.0)):
+        share = sum(fails(7, eid, 3, margin, 3.0) for eid in range(4000)) / 4000
+        assert share == pytest.approx(expected, abs=0.03), margin
+    assert not any(fails(7, eid, 3, 0.5, 0.0) for eid in range(100))
+
+
+def test_the_crc_band_verdict_is_the_draw_for_that_frame_and_receiver(ether):
+    """With the seed fixed, the verdict is exactly what crc_band_fails says."""
+    ether.physics = {"crc_band_db": 60}
+    ether.seed = 5
+    sender, receiver = ether(1, 0), ether(2, FAR_M)
+    sender.hello()
+    receiver.hello()
+    receiver.state("RX")
+    time.sleep(0.1)
+    sender.tx(211)
+    margin = expected_level(FAR_M) - (-174 + 10 * math.log10(BW)
+                                      + ether_module.DEFAULT_NOISE_FIGURE_DB
+                                      + ether_module.SENSITIVITY_DB[SF])
+    failed = ether_module.crc_band_fails(5, 1, 2, margin, 60)
+    assert receiver.expect("rx_end")["verdict"] == ("crc" if failed else "clean")
+
+
 def test_a_station_that_was_never_placed_hears_nothing(ether):
     """Position is the whole of a station's presence in the medium: one that
     has none is not on the plane, and no distance to it exists."""

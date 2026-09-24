@@ -67,13 +67,14 @@ DEFAULT_SETUP = [
 
 DEFAULT_PHYSICS = {"exponent": 2.7, "noise_figure_db": 6, "capture_db": 6,
                    "shadowing_db": 0, "shadowing_seed": 0,
-                   "capture_model": "margin", "sf_orthogonality": "none"}
+                   "capture_model": "margin", "sf_orthogonality": "none",
+                   "crc_band_db": 0}
 
 # Physics a file carries only when it says something, so a scenario written
 # before they existed, or one that leaves them at their defaults, is written
 # back exactly as it was read.
 OPTIONAL_PHYSICS = ("shadowing_db", "shadowing_seed", "capture_model",
-                    "sf_orthogonality")
+                    "sf_orthogonality", "crc_band_db")
 
 
 def physics_value(key, value):

@@ -230,11 +230,13 @@ medium: the ether's job is the frames, and everything watching is optional.
 - **Fading and per-frame variation.** A level is computed once, from the
   geometry and the pair's shadowing, and is the same for every frame between
   one pair. No multipath, no antenna pattern, no rain.
-- **The CRC band.** The threshold is the spreading factor's own, and above it a
-  frame is delivered. A real receiver also has a few dB above that threshold
-  where a frame locks but fails its CRC at a probability. `welcome` already
-  carries a `seed` so that band, when it arrives, has a reproducible generator
-  to draw from.
+- **The CRC band, by default.** The threshold is the spreading factor's own,
+  and above it a frame is delivered. A real receiver also has a few dB above
+  that threshold where a frame locks but fails its CRC at a probability, and
+  `crc_band_db` models that as a straight line from certain failure at the
+  threshold to none at the top of the band, drawn from the ether's seed. The
+  line is a simplification of a steeper, S-shaped curve; the band's width is
+  the scenario's to state.
 - **Orthogonality, by default.** Two frames on one carrier interfere whatever
   their spreading factors, though a real receiver can often demodulate through
   a frame at another SF. The medium is pessimistic here, and knowingly, unless

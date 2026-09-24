@@ -190,6 +190,8 @@
                     outlined dense label="Capture" hint="bench: as measured" />
           <q-select class="col" v-model="physics.sf_orthogonality" :options="['none', 'croce']"
                     outlined dense label="Other SFs" hint="croce: measured SIR" />
+          <q-input class="col" v-model.number="physics.crc_band_db" type="number" step="0.5"
+                   outlined dense label="CRC band (dB)" hint="0 is none" />
         </q-card-section>
         <q-card-section>
           <div class="text-caption text-grey-6 q-mb-sm">
@@ -237,7 +239,7 @@ const waiting = ref(false)
 const setupDraft = ref('')
 const physics = reactive({ exponent: 2.7, noise_figure_db: 6, capture_db: 6,
                            shadowing_db: 0, shadowing_seed: 0, capture_model: 'margin',
-                           sf_orthogonality: 'none' })
+                           sf_orthogonality: 'none', crc_band_db: 0 })
 
 sim.connect()
 

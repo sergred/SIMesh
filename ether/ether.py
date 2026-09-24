@@ -76,6 +76,7 @@ DEFAULT_CAPTURE_MODEL = "margin"   # or "bench": capture as a bench measured it
 CAPTURE_MODELS = ("margin", "bench")
 DEFAULT_SF_ORTHOGONALITY = "none"  # or "croce": another SF interferes less
 SF_ORTHOGONALITIES = ("none", "croce")
+DEFAULT_CRC_BAND_DB = 0.0   # how far above its threshold a frame can still fail
 
 # How far under a frame at another spreading factor a frame can be and still
 # be received, in dB, measured with an SX1272 at 125 kHz: D. Croce et al.,
@@ -197,6 +198,18 @@ def pair_draw(seed, eid_a, eid_b, rsid, what):
     return int.from_bytes(digest[:8], "big") / 2.0 ** 64
 
 
+def crc_band_fails(seed, eid, rsid, margin_db, band_db):
+    """Whether a frame this far above its threshold fails its CRC anyway.
+
+    Within `band_db` of the threshold the chance falls in a straight line from
+    certain, at the threshold, to nothing at the top of the band; the draw is
+    one per frame and receiver, from the ether's seed.
+    """
+    if band_db <= 0 or margin_db >= band_db:
+        return False
+    return pair_draw(seed, eid, eid, rsid, "crc band") < 1.0 - max(margin_db, 0.0) / band_db
+
+
 def bench_stronger_odds(lead):
     """How often the stronger of two frames that met survives, by its lead."""
     if lead >= BENCH_CERTAIN_DB:
@@ -248,7 +261,8 @@ class Physics:
                  shadowing_db=DEFAULT_SHADOWING_DB,
                  shadowing_seed=DEFAULT_SHADOWING_SEED,
                  capture_model=DEFAULT_CAPTURE_MODEL,
-                 sf_orthogonality=DEFAULT_SF_ORTHOGONALITY):
+                 sf_orthogonality=DEFAULT_SF_ORTHOGONALITY,
+                 crc_band_db=DEFAULT_CRC_BAND_DB):
         self.exponent = float(exponent)
         self.noise_figure_db = float(noise_figure_db)
         self.capture_db = float(capture_db)
@@ -262,6 +276,7 @@ class Physics:
             raise ValueError("sf_orthogonality is one of %s, not %r"
                              % (", ".join(SF_ORTHOGONALITIES), sf_orthogonality))
         self.sf_orthogonality = sf_orthogonality
+        self.crc_band_db = float(crc_band_db)
 
     def describe(self):
         if self.capture_model == "bench":
@@ -272,6 +287,8 @@ class Physics:
             self.exponent, self.noise_figure_db, capture)
         if self.sf_orthogonality == "croce":
             text += ", spreading factors apart by Croce's table"
+        if self.crc_band_db:
+            text += ", a %.1f dB CRC band" % self.crc_band_db
         if self.shadowing_db:
             text += ", shadowing %.1f dB (seed %d)" % (self.shadowing_db,
                                                       self.shadowing_seed)
@@ -286,7 +303,8 @@ class Physics:
                    data.get("shadowing_db", DEFAULT_SHADOWING_DB),
                    data.get("shadowing_seed", DEFAULT_SHADOWING_SEED),
                    data.get("capture_model", DEFAULT_CAPTURE_MODEL),
-                   data.get("sf_orthogonality", DEFAULT_SF_ORTHOGONALITY))
+                   data.get("sf_orthogonality", DEFAULT_SF_ORTHOGONALITY),
+                   data.get("crc_band_db", DEFAULT_CRC_BAND_DB))
 
     def as_dict(self):
         return {"exponent": self.exponent,
@@ -295,7 +313,8 @@ class Physics:
                 "shadowing_db": self.shadowing_db,
                 "shadowing_seed": self.shadowing_seed,
                 "capture_model": self.capture_model,
-                "sf_orthogonality": self.sf_orthogonality}
+                "sf_orthogonality": self.sf_orthogonality,
+                "crc_band_db": self.crc_band_db}
 
 
 class Placement:
@@ -734,6 +753,10 @@ class Ether(asyncio.DatagramProtocol):
     def deliver_end(self, frame, rsid, slot, level):
         """Close out one receiver's reception of a frame, at its stated end."""
         verdict = self.verdict_for(frame, rsid, level)
+        if verdict == "clean" and self.physics.crc_band_db:
+            margin = level - (self.noise(frame.bw) + self.sensitivity(frame.sf))
+            if crc_band_fails(self.seed, frame.eid, rsid, margin, self.physics.crc_band_db):
+                verdict = "crc"
         self.send(rsid, {"type": "rx_end", "slot": slot, "id": frame.eid,
                          "t": self.now(), "verdict": verdict,
                          "payload": frame.payload, "rssi": round(level),

@@ -152,6 +152,15 @@ def test_sf_orthogonality_is_written_only_when_asked_for_and_checked(tmp_path):
         sc.set_physics({"sf_orthogonality": "perfect"})
 
 
+def test_the_crc_band_is_written_only_when_set(tmp_path):
+    data = scenario_module.read(write(tmp_path, MIXED))
+    assert "crc_band_db" not in scenario_module.dump(data)
+    data["physics"]["crc_band_db"] = 3
+    text = scenario_module.dump(data)
+    assert "crc_band_db: 3" in text
+    assert scenario_module.read(write(tmp_path, text, "again.yaml")) == data
+
+
 def test_scenario_setup_goes_to_the_first_kind_only(tmp_path):
     data = scenario_module.read(write(tmp_path, MIXED))
     sc = scenario_module.Scenario("mixed", data, run_dir=str(tmp_path / "run"))
