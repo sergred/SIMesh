@@ -78,6 +78,15 @@ enum {
  * something was found. */
 enum { CAD_ONLY = 0x00, CAD_RX = 0x01 };
 
+/* How many symbols into a frame a receiver that has heard it from the start
+ * finds the preamble and raises PreambleDetected. A real modem finds it within
+ * a few symbols, long before the sync word that `t_pre` marks. Firmware that
+ * senses the channel by asking the demodulator measured a blind window of about
+ * 4 ms at SF7 and 125 kHz: three boards, 150 trials. So 4 symbols is an upper
+ * bound. Raised at the sync word instead, the same firmware is blind for the
+ * whole preamble: 29 ms at SF7 with 24 symbols, 46 ms at SF8 with 18. */
+constexpr double kPreambleFoundSymbols = 4.0;
+
 enum {
     REG_VERSION_STRING  = 0x0320,
     REG_IQ_CONFIG       = 0x0736,
@@ -253,6 +262,7 @@ struct simradio {
      * first use and kept for the chip's life. */
     void* tTxDone = nullptr;
     void* tPre = nullptr;
+    void* tSync = nullptr;
     void* tHdr = nullptr;
     void* tCad = nullptr;
 };
@@ -335,6 +345,7 @@ void dropLock(simradio* c)
     d.lockEndUs = 0;
     d.pendingValid = false;
     stopTimer(c->tPre);
+    stopTimer(c->tSync);
     stopTimer(c->tHdr);
 }
 
@@ -350,6 +361,7 @@ void abandonReception(simradio* c)
 
 void txDoneCb(void* arg);
 void rxPreCb(void* arg);
+void rxSyncCb(void* arg);
 void rxHdrCb(void* arg);
 void rxEndCb(void* arg);
 void cadDoneCb(void* arg);
@@ -381,6 +393,7 @@ extern "C" simradio_t* simradio_open(int slot, void (*on_pin)(void*, int, int), 
          * lives for the process, because a timer may be about to fire on it. */
         stopTimer(c->tTxDone);
         stopTimer(c->tPre);
+        stopTimer(c->tSync);
         stopTimer(c->tHdr);
         stopTimer(c->tCad);
         c->st = ChipState();
@@ -397,6 +410,7 @@ extern "C" void simradio_close(simradio_t* c)
     S()->lock();
     stopTimer(c->tTxDone);
     stopTimer(c->tPre);
+    stopTimer(c->tSync);
     stopTimer(c->tHdr);
     stopTimer(c->tCad);
     c->onPin = nullptr;
@@ -727,7 +741,12 @@ void txDoneCb(void* arg)
 
 void rxPreCb(void* arg)
 {
-    raise((simradio*)arg, IRQ_PREAMBLE_DETECTED | IRQ_SYNC_WORD_VALID);
+    raise((simradio*)arg, IRQ_PREAMBLE_DETECTED);
+}
+
+void rxSyncCb(void* arg)
+{
+    raise((simradio*)arg, IRQ_SYNC_WORD_VALID);
 }
 
 void rxHdrCb(void* arg)
@@ -817,8 +836,13 @@ void modelRxBegin(simradio* c, const VirtualRxBegin& f)
     d.lockEndUs = now + (f.tEnd - f.t0);
 
     /* The sender's stamps are its own clock's; only the gaps between them mean
-     * anything here, and they are measured from this instant. */
-    armOnce(c, &c->tPre, rxPreCb, f.tPre - f.t0);
+     * anything here, and they are measured from this instant. The preamble is
+     * found a few symbols in, and the sync word lands where `t_pre` says. */
+    int64_t syncUs = f.tPre - f.t0;
+    double tSym = (double)((uint32_t)1 << d.sf) / (double)d.bwHz;
+    int64_t foundUs = (int64_t)(kPreambleFoundSymbols * tSym * 1e6);
+    armOnce(c, &c->tPre, rxPreCb, foundUs < syncUs ? foundUs : syncUs);
+    armOnce(c, &c->tSync, rxSyncCb, syncUs);
     armOnce(c, &c->tHdr, rxHdrCb, f.tHdr - f.t0);
     S()->unlock();
 }
