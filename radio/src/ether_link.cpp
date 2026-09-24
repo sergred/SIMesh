@@ -85,6 +85,16 @@ void handleMessage(const char* text, size_t len)
             f.snrDb    = (int)msg.num("snr", 10);
             modelRxEnd(chip, f);
         }
+    } else if (type == "energy") {
+        simradio* chip = modelChip((int)msg.num("slot", 0));
+        if (chip) {
+            VirtualRxBegin f = {};
+            f.id       = (int)msg.num("id", 0);
+            f.t0       = msg.num("t0", 0);
+            f.tEnd     = msg.num("t_end", 0);
+            f.levelDbm = (int)msg.num("level", kNoiseFloorDbm);
+            modelEnergy(chip, f);
+        }
     } else if (type == "welcome") {
         S()->log(SIMRADIO_LOG_INFO, "ether: %s at t0 %lld",
                  msg.str("mode", "real").c_str(), (long long)msg.num("t0", 0));

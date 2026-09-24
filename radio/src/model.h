@@ -54,3 +54,8 @@ struct simradio* modelChip(int slot);
 
 void modelRxBegin(struct simradio* chip, const VirtualRxBegin& f);
 void modelRxEnd(struct simradio* chip, const VirtualRxEnd& f);
+
+/** A frame that was already on the air when this receiver started listening:
+ *  its energy until `tEnd`, and nothing to demodulate. Only `t0`, `tEnd` and
+ *  `levelDbm` are read. */
+void modelEnergy(struct simradio* chip, const VirtualRxBegin& f);

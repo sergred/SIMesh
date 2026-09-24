@@ -111,6 +111,17 @@ draw a green flash for a station that only listened for energy. So its
 `rx_begin` carries `"cad": true` and no `rx_end` is scheduled; whether the
 slot was sensing is decided at the frame's start, from its last `state`.
 
+A slot that starts listening after a frame began is the other half of carrier
+sense. It could be back from its own transmission, out of standby, or into a
+CAD. It missed the preamble, so it cannot demodulate the frame, but the frame
+is still on the air: a real radio's instantaneous RSSI reads it and a CAD
+finds it. So every `state` that says `RX` or `CAD` is answered with an
+`energy` message for each frame on the air that the slot could hear by the
+rules above. The message gives the level and the end, and nothing else: no
+`rx_begin`, no `rx_end`, no reception. Without it, a station was blind to
+every frame that began during its own transmission. It then read the noise
+floor and sent into a frame it would have heard on a bench.
+
 Matching is on the **last stated** values, not on anything the ether infers.
 This is why a station publishes a `state` on every command that changes its mode
 or carrier, and why a model that forgot to would go deaf silently. The one thing
@@ -159,7 +170,8 @@ across the air, and only the medium can issue one.
 `rx_begin` goes out immediately, so the receiver can arm its preamble, sync and
 header interrupts on the offsets. `rx_end` is a timer at the frame's stated
 span. Nothing re-reads the frame in between — a receiver that leaves `RX`
-mid-frame is not told, and discards the reception itself.
+mid-frame is not told, and discards the reception itself. One that comes
+back before the end is told the frame's `energy`, not the frame.
 
 Both carry the link's level: `rx_begin` as `level`, which is what an
 instantaneous RSSI reads and what carrier sense acts on, and `rx_end` as `rssi`

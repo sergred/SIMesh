@@ -138,6 +138,10 @@ class FakeEther:
                         "t_pre": t0 + pre_us, "t_hdr": t0 + hdr_us,
                         "t_end": t0 + end_us, "level": level}, **extra))
 
+    def energy(self, eid, level, end_us, t0=5_000_000):
+        self.send({"type": "energy", "slot": 0, "id": eid, "t0": t0,
+                   "t_end": t0 + end_us, "level": level})
+
     def rx_end(self, eid, payload, verdict="clean", rssi=-80, snr=7):
         self.send({"type": "rx_end", "slot": 0, "id": eid, "t": 0, "verdict": verdict,
                    "payload": base64.b64encode(payload).decode(),
@@ -506,6 +510,38 @@ def test_a_frame_that_starts_during_cad_is_energy(chip):
     assert chip.read(GET_IRQ, 2)            # and nothing was demodulated:
     settle(0.1)
     assert chip.irq() & (PREAMBLE | HEADER_VALID | RX_DONE) == 0
+
+
+def test_energy_the_receiver_walked_in_on_is_read_and_found_not_received(chip):
+    """A frame already on the air when the receiver began listening: the
+    instantaneous RSSI reads it and a CAD finds it, and nothing is
+    demodulated."""
+    chip.configure()
+    chip.write(SET_RX, 0xFF, 0xFF, 0xFF)
+    settle()
+    chip.ether.energy(801, -75, 150_000)
+    settle(0.03)
+    assert chip.read(GET_RSSI_INST, 1)[0] == 150        # -2 x -75
+    start_cad(chip)
+    chip.wait_irq(CAD_DONE)
+    assert chip.irq() == CAD_DONE | CAD_DETECTED
+    settle(0.2)
+    chip.write(SET_RX, 0xFF, 0xFF, 0xFF)
+    settle()
+    assert chip.read(GET_RSSI_INST, 1)[0] == 220        # over: the floor
+    assert chip.irq() & (PREAMBLE | HEADER_VALID | RX_DONE) == 0
+
+
+def test_energy_told_outside_rx_and_cad_is_not_kept(chip):
+    """A station in standby is told nothing by the ether; one that is told
+    anyway, because it left RX as the message crossed, does not keep it."""
+    chip.configure()
+    chip.write(SET_STANDBY, 0x00)
+    chip.ether.energy(802, -75, 300_000)
+    settle(0.03)
+    chip.write(SET_RX, 0xFF, 0xFF, 0xFF)
+    settle(0.01)
+    assert chip.read(GET_RSSI_INST, 1)[0] == 220
 
 
 # ---------------------------------------------------------------------------

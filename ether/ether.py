@@ -7,7 +7,10 @@ and hand over a transmission with `tx`; the ether answers `welcome`,
 enough for it to rise out of the noise and whose latest state is `RX` on the
 same carrier, bandwidth, spreading factor and sync word. A station in `CAD`
 on that carrier is told the frame is arriving and nothing more: it is sensing
-energy, not receiving. Two frames sharing a
+energy, not receiving. A station that starts listening while a frame is
+already on the air is told its `energy` and nothing more: it has missed the
+preamble, but an instantaneous RSSI reads the frame and a CAD finds it. Two
+frames sharing a
 carrier and any instant of air interfere, and each receiver decides the
 outcome for itself: the stronger frame survives when it leads the other by the
 capture margin.
@@ -215,6 +218,9 @@ class Frame:
         self.sync = msg.get("sync")
         self.power_dbm = msg.get("power_dbm", DEFAULT_POWER_DBM)
         self.payload = msg.get("payload", "")
+        # What a receiver's stated radio is matched against, kept for the
+        # stations that start listening while this frame is on the air.
+        self.radio = {key: msg.get(key) for key in ("freq",) + MATCH_KEYS}
         self.start_us = start_us
         self.end_us = end_us
         self.pre_us = pre_us
@@ -441,6 +447,36 @@ class Ether(asyncio.DatagramProtocol):
             sid, slot, msg.get("mode"), msg.get("freq"), msg.get("bw"),
             msg.get("sf"), msg.get("sync")))
         self.raise_event(self.on_station, sid, msg)
+        if msg.get("mode") in ("RX", "CAD"):
+            self.tell_energy(sid, slot)
+
+    def tell_energy(self, rsid, slot):
+        """The frames already on the air when a slot starts listening.
+
+        A frame is delivered to the slots that are listening when it starts.
+        A slot that starts later — back from its own transmission, out of
+        standby, into a CAD — has missed the preamble and cannot demodulate
+        the frame, but the frame is still on the air: an instantaneous RSSI
+        reads it and a CAD finds it. Without this, carrier sense is blind to
+        every frame that began while the station was not listening, which is
+        every frame that began during its own transmission. So the slot is
+        told of the frame's energy until its end, and of nothing else: no
+        `rx_begin`, no `rx_end`, no reception to rule on.
+        """
+        now = self.now()
+        rstation = self.stations[rsid]
+        state = rstation.state(slot)
+        for frame in self.frames:
+            if frame.sid == rsid or not frame.start_us < now < frame.end_us:
+                continue
+            if not self.matches(state, frame.radio):
+                continue
+            level = self.level(frame.sid, rsid, frame.freq, frame.power_dbm)
+            if not self.audible(level, frame.bw, frame.sf):
+                continue
+            self.send(rsid, {"type": "energy", "slot": slot, "id": frame.eid,
+                             "t0": now, "t_end": frame.end_us,
+                             "level": round(level)})
 
     def recv_tx(self, sid, addr, msg):
         station = self.station_for(sid, addr)
