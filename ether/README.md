@@ -82,6 +82,13 @@ one a receiver is already following is never received there, however strong,
 and it spoils the first unless the first is the stronger. The draws come from
 the ether's seed, which a run alone takes as `--seed`.
 
+Frames at different spreading factors interfere as if they shared one, unless
+the scenario says `sf_orthogonality: croce`. Then a frame survives one at
+another spreading factor as long as it is no further under it than a measured
+table allows: an SX1272 at 125 kHz, from D. Croce et al., IEEE Communications
+Letters 22(4), 2018, Table II. An SF12 frame survives one at SF7 up to 25 dB
+louder; an SF7 frame survives one at SF8 up to 8 dB louder.
+
 A station is deaf while its own frame is going out — the radio is half duplex —
 which is what makes a hidden terminal behave like one: two stations that cannot
 hear each other do not defer to each other either.

@@ -74,6 +74,25 @@ DEFAULT_SHADOWING_DB = 0.0  # the spread of a pair's shadowing draw; 0 is none
 DEFAULT_SHADOWING_SEED = 0  # which draws: the same seed is the same ground
 DEFAULT_CAPTURE_MODEL = "margin"   # or "bench": capture as a bench measured it
 CAPTURE_MODELS = ("margin", "bench")
+DEFAULT_SF_ORTHOGONALITY = "none"  # or "croce": another SF interferes less
+SF_ORTHOGONALITIES = ("none", "croce")
+
+# How far under a frame at another spreading factor a frame can be and still
+# be received, in dB, measured with an SX1272 at 125 kHz: D. Croce et al.,
+# "Impact of LoRa Imperfect Orthogonality: Analysis of Link-Level Performance",
+# IEEE Communications Letters 22(4), 2018, doi:10.1109/LCOMM.2018.2797057,
+# Table II. Keyed by the wanted frame's spreading factor, then the
+# interferer's. The table's diagonal (+1 dB) is not used: two frames at one
+# spreading factor go by the capture rule. SF5 and SF6 were not measured, and
+# a pair involving them interferes as if it shared a spreading factor.
+CROCE_SIR_DB = {
+    7: {8: -8, 9: -9, 10: -9, 11: -9, 12: -9},
+    8: {7: -11, 9: -11, 10: -12, 11: -13, 12: -13},
+    9: {7: -15, 8: -13, 10: -13, 11: -14, 12: -15},
+    10: {7: -19, 8: -18, 9: -17, 11: -17, 12: -18},
+    11: {7: -22, 8: -22, 9: -21, 10: -20, 12: -20},
+    12: {7: -25, 8: -25, 9: -25, 10: -24, 11: -23},
+}
 
 # Capture as a bench measured it: an SX1262 listening, an SX1262 and an LR2021
 # sending, SF7 at 125 kHz, 289 collisions of two frames that started within
@@ -228,7 +247,8 @@ class Physics:
                  capture_db=DEFAULT_CAPTURE_DB,
                  shadowing_db=DEFAULT_SHADOWING_DB,
                  shadowing_seed=DEFAULT_SHADOWING_SEED,
-                 capture_model=DEFAULT_CAPTURE_MODEL):
+                 capture_model=DEFAULT_CAPTURE_MODEL,
+                 sf_orthogonality=DEFAULT_SF_ORTHOGONALITY):
         self.exponent = float(exponent)
         self.noise_figure_db = float(noise_figure_db)
         self.capture_db = float(capture_db)
@@ -238,6 +258,10 @@ class Physics:
             raise ValueError("capture_model is one of %s, not %r"
                              % (", ".join(CAPTURE_MODELS), capture_model))
         self.capture_model = capture_model
+        if sf_orthogonality not in SF_ORTHOGONALITIES:
+            raise ValueError("sf_orthogonality is one of %s, not %r"
+                             % (", ".join(SF_ORTHOGONALITIES), sf_orthogonality))
+        self.sf_orthogonality = sf_orthogonality
 
     def describe(self):
         if self.capture_model == "bench":
@@ -246,6 +270,8 @@ class Physics:
             capture = "capture margin %.1f dB" % self.capture_db
         text = "exponent %.2f, noise figure %.1f dB, %s" % (
             self.exponent, self.noise_figure_db, capture)
+        if self.sf_orthogonality == "croce":
+            text += ", spreading factors apart by Croce's table"
         if self.shadowing_db:
             text += ", shadowing %.1f dB (seed %d)" % (self.shadowing_db,
                                                       self.shadowing_seed)
@@ -259,7 +285,8 @@ class Physics:
                    data.get("capture_db", DEFAULT_CAPTURE_DB),
                    data.get("shadowing_db", DEFAULT_SHADOWING_DB),
                    data.get("shadowing_seed", DEFAULT_SHADOWING_SEED),
-                   data.get("capture_model", DEFAULT_CAPTURE_MODEL))
+                   data.get("capture_model", DEFAULT_CAPTURE_MODEL),
+                   data.get("sf_orthogonality", DEFAULT_SF_ORTHOGONALITY))
 
     def as_dict(self):
         return {"exponent": self.exponent,
@@ -267,7 +294,8 @@ class Physics:
                 "capture_db": self.capture_db,
                 "shadowing_db": self.shadowing_db,
                 "shadowing_seed": self.shadowing_seed,
-                "capture_model": self.capture_model}
+                "capture_model": self.capture_model,
+                "sf_orthogonality": self.sf_orthogonality}
 
 
 class Placement:
@@ -687,6 +715,11 @@ class Ether(asyncio.DatagramProtocol):
             against = self.level(other.sid, rsid, other.freq, other.power_dbm)
             if not self.audible(against, other.bw, other.sf):
                 continue        # this receiver never heard the other frame
+            apart = CROCE_SIR_DB.get(frame.sf, {}).get(other.sf)
+            if self.physics.sf_orthogonality == "croce" and apart is not None:
+                if level - against < apart:
+                    return "crc"
+                continue        # another spreading factor: its table, not capture
             if self.physics.capture_model == "bench":
                 if (other.start_us, other.eid) < (frame.start_us, frame.eid):
                     survives = self.bench_pair(other, frame, rsid, against - level)[1]

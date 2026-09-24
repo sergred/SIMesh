@@ -67,12 +67,13 @@ DEFAULT_SETUP = [
 
 DEFAULT_PHYSICS = {"exponent": 2.7, "noise_figure_db": 6, "capture_db": 6,
                    "shadowing_db": 0, "shadowing_seed": 0,
-                   "capture_model": "margin"}
+                   "capture_model": "margin", "sf_orthogonality": "none"}
 
 # Physics a file carries only when it says something, so a scenario written
 # before they existed, or one that leaves them at their defaults, is written
 # back exactly as it was read.
-OPTIONAL_PHYSICS = ("shadowing_db", "shadowing_seed", "capture_model")
+OPTIONAL_PHYSICS = ("shadowing_db", "shadowing_seed", "capture_model",
+                    "sf_orthogonality")
 
 
 def physics_value(key, value):
@@ -81,6 +82,10 @@ def physics_value(key, value):
     if key == "capture_model":
         if value not in ("margin", "bench"):
             raise ScenarioError("capture_model is margin or bench, not %r" % (value,))
+        return value
+    if key == "sf_orthogonality":
+        if value not in ("none", "croce"):
+            raise ScenarioError("sf_orthogonality is none or croce, not %r" % (value,))
         return value
     if key == "shadowing_seed":
         return int(value)
@@ -292,6 +297,7 @@ def read(path):
     filled["physics"] = {**DEFAULT_PHYSICS, **(data.get("physics") or {})}
     try:
         physics_value("capture_model", filled["physics"]["capture_model"])
+        physics_value("sf_orthogonality", filled["physics"]["sf_orthogonality"])
     except ScenarioError as err:
         raise ScenarioError("%s: %s" % (path, err)) from err
     kinds = data.get("kinds")
