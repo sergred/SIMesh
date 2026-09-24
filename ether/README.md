@@ -51,7 +51,10 @@ demodulator tolerates and what lets two drivers that round one frequency
 differently hear each other. A station whose radio last said it was in **CAD** (channel activity
 detection) on that carrier is told the frame is arriving and nothing more:
 it is sensing energy, so it gets an `rx_begin` marked `"cad": true` and no
-`rx_end`, and no reception is recorded for it.
+`rx_end`, and no reception is recorded for it. A station that starts
+listening, in RX or CAD, while a frame is already on the air has missed its
+preamble and cannot demodulate it. It gets an `energy` message instead, so
+its instantaneous RSSI reads the frame and a CAD finds it until it ends.
 
 The ether does not match on preamble length: two radios whose preambles
 differ hear each other here, and may not on a bench.
@@ -124,6 +127,7 @@ Positions are not on it in either direction: a station never learns where it is.
 | `welcome` | joined; the ether's clock origin, its seed, and that it runs in real time |
 | `rx_begin` | a frame is arriving: when its preamble, header and end fall, and how strongly; `"cad": true` when the station is in CAD and no end will follow |
 | `rx_end` | that frame is over: the verdict, the payload, RSSI and SNR |
+| `energy` | a frame was already on the air when this slot started listening: how strongly, and until when; nothing to demodulate |
 
 A station's `t` fields are its own clock and mean something only against each
 other within one message. Unknown message types are ignored, on both sides.

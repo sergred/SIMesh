@@ -449,6 +449,59 @@ def test_a_station_in_cad_senses_a_frame_but_is_never_told_how_it_ended(ether):
     assert ends == []
 
 
+# A frame long enough to start listening in the middle of.
+LONG_US = 400_000
+
+
+@pytest.mark.parametrize("mode", ["RX", "CAD"])
+def test_a_station_that_starts_listening_mid_frame_is_told_its_energy_only(ether, mode):
+    """A frame goes to the slots listening when it starts. One that starts
+    listening while the frame is on the air, here out of standby, has missed
+    the preamble and cannot demodulate it. Its RSSI still reads the frame and
+    a CAD still finds it: it is told the energy until the end, and nothing
+    else."""
+    sender, late = ether(1, 0), ether(2, NEAR_M)
+    sender.hello()
+    late.hello()
+    late.state("STDBY_RC")
+    time.sleep(0.05)
+
+    sender.tx(44, payload=b"already on the air", span_us=LONG_US)
+    time.sleep(0.1)
+    late.state(mode)
+    energy = late.expect("energy")
+    assert energy["level"] == round(expected_level(NEAR_M))
+    assert 0 < energy["t_end"] - energy["t0"] < LONG_US - 50_000   # what is left
+    late.expect_nothing(timeout=LONG_US / 1e6)      # no rx_begin, no rx_end
+
+
+def test_energy_is_told_only_of_frames_on_the_air_that_the_slot_could_hear(ether):
+    """Not a frame that is already over, not one on another spreading factor,
+    and not the station's own."""
+    a, b = ether(1, 0), ether(2, NEAR_M)
+    a.hello()
+    b.hello()
+    b.state("STDBY_RC")
+    time.sleep(0.05)
+
+    a.tx(46, span_us=100_000)
+    time.sleep(0.2)
+    b.state("RX")                   # it ended before anyone listened
+    b.expect_nothing()
+
+    b.state("STDBY_RC")
+    a.tx(47, span_us=LONG_US, sf=SF + 1)
+    time.sleep(0.05)
+    b.state("RX")                   # still on the other spreading factor
+    b.expect_nothing()
+
+    time.sleep(LONG_US / 1e6)
+    a.tx(48, span_us=LONG_US)
+    b.expect("rx_begin")            # listening from the start: the frame itself
+    a.state("RX")                   # its own frame is not energy to it
+    a.expect_nothing()
+
+
 def test_an_obstruction_puts_a_pair_out_of_earshot(ether):
     """The line of three: a wall between the outer pair, and nothing between
     either of them and the station in the middle."""

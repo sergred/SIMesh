@@ -777,9 +777,32 @@ void cadDoneCb(void* arg)
     raise(c, bits);
 }
 
+/* A frame's energy at this antenna until its end: what an instantaneous RSSI
+ * reads, and what a CAD finds. */
+void feelEnergy(ChipState& d, int64_t now, const VirtualRxBegin& f)
+{
+    int64_t endUs = now + (f.tEnd - f.t0);
+    if (now >= d.airEndUs) d.airLevel = 0;
+    if (f.levelDbm > d.airLevel || d.airLevel == 0) d.airLevel = f.levelDbm;
+    if (endUs > d.airEndUs) d.airEndUs = endUs;
+    if (endUs > d.heardEndUs) d.heardEndUs = endUs;
+}
+
 }  // namespace
 
 /* ---- What the ether hands back ---- */
+
+/* A frame this receiver walked in on. It missed the preamble, so there is
+ * nothing to demodulate, but the frame is on the air until it ends. */
+void modelEnergy(simradio* c, const VirtualRxBegin& f)
+{
+    int64_t now = S()->now_us();
+    S()->lock();
+    ChipState& d = c->st;
+    if (strcmp(d.mode, "RX") == 0 || strcmp(d.mode, "CAD") == 0)
+        feelEnergy(d, now, f);
+    S()->unlock();
+}
 
 void modelRxBegin(simradio* c, const VirtualRxBegin& f)
 {
@@ -792,11 +815,7 @@ void modelRxBegin(simradio* c, const VirtualRxBegin& f)
 
     /* Energy first: every frame in the air raises the instantaneous reading,
      * whether or not this receiver is following it. */
-    int64_t endUs = now + (f.tEnd - f.t0);
-    if (now >= d.airEndUs) d.airLevel = 0;
-    if (f.levelDbm > d.airLevel || d.airLevel == 0) d.airLevel = f.levelDbm;
-    if (endUs > d.airEndUs) d.airEndUs = endUs;
-    if (endUs > d.heardEndUs) d.heardEndUs = endUs;
+    feelEnergy(d, now, f);
 
     /* A CAD senses; it demodulates nothing. */
     if (cad) { S()->unlock(); return; }
