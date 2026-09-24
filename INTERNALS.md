@@ -431,7 +431,8 @@ and drops the host's callback, and opening the slot again powers it up fresh.
 
 Real time, throughout. `esp_timer` is `CLOCK_MONOTONIC` in microseconds from
 the first reading, and every timed event in the model — the instant a
-preamble ends, a header lands, a frame finishes — is an `esp_timer` one-shot.
+preamble is found, a sync word ends, a header lands, a frame finishes — is an
+`esp_timer` one-shot.
 The FreeRTOS tick is 100 Hz, so nothing is accurate below ten milliseconds;
 the frames the driver sends take tens to hundreds of milliseconds, which is
 why that is survivable.

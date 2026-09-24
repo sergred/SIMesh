@@ -327,8 +327,10 @@ def test_rx_begin_raises_preamble_and_header_then_rx_end_delivers(chip):
     chip.ether.rx_begin(101, -80, pre_us=60_000, hdr_us=100_000, end_us=250_000)
 
     at = chip.wait_irq(PREAMBLE)
+    assert at - begun == pytest.approx(4 * TSYM, abs=0.010)
+    assert chip.irq() & (SYNC | HEADER_VALID) == 0
+    at = chip.wait_irq(SYNC)
     assert at - begun == pytest.approx(0.060, abs=0.010)
-    assert chip.irq() & (PREAMBLE | SYNC) == PREAMBLE | SYNC
     assert chip.irq() & HEADER_VALID == 0
     at = chip.wait_irq(HEADER_VALID)
     assert at - begun == pytest.approx(0.100, abs=0.010)
@@ -354,6 +356,22 @@ def test_rx_end_with_a_crc_verdict_raises_crc_err(chip):
     chip.ether.rx_end(102, b"spoiled", verdict="crc")
     chip.wait_irq(RX_DONE)
     assert chip.irq() & (RX_DONE | CRC_ERR) == RX_DONE | CRC_ERR
+
+
+def test_a_long_preamble_is_found_long_before_its_sync_word(chip):
+    """PreambleDetected comes four symbols into a frame, however long the
+    preamble is. Firmware that senses the channel by asking the demodulator
+    waits on that bit."""
+    chip.configure()
+    chip.write(SET_RX, 0xFF, 0xFF, 0xFF)
+    settle()
+    begun = time.monotonic()
+    chip.ether.rx_begin(103, -80, pre_us=150_000, hdr_us=170_000, end_us=300_000)
+    at = chip.wait_irq(PREAMBLE)
+    assert at - begun < 0.060                   # the sync word is 150 ms in
+    assert chip.irq() & SYNC == 0
+    chip.ether.rx_end(103, b"found early")
+    chip.wait_irq(RX_DONE)
 
 
 def test_a_louder_frame_takes_the_receiver_only_past_the_capture_margin(chip):
@@ -532,7 +550,8 @@ def test_clear_irq_clears_only_the_given_bits_and_reads_never_tear(chip):
     chip.write(SET_RX, 0xFF, 0xFF, 0xFF)
     settle()
     chip.ether.rx_begin(801, -90, 900_000, 950_000, 2_000_000)
-    settle(0.02)
+    chip.wait_irq(PREAMBLE)         # found four symbols in; the rest is far off
+    chip.clear_irq()
     seen = set()
     stop = threading.Event()
 

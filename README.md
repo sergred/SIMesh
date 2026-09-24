@@ -244,7 +244,7 @@ or through **Run command** on the page.
 | a path forms through the Reticulous transports | `rncfg heard <kiss>` on each Sergeyculum station lists the other at `hops 2`; the Reticulous stations repeat Sergeyculum announces as `via <fp> hops=1` in the record. The repeat follows the Reticulous announce schedule, so allow a minute |
 | a packet routes through | `rncfg send <kiss> <lxmf.delivery of the other> <text>` (48 B at most; longer needs a link). The record shows the Sergeyculum frame, the Reticulous forward at `hops=1`, the Sergeyculum proof. `rncfg mbox <kiss> count` at the far end |
 | two-frame splits both ways | a 260 B Sergeyculum packet leaves as `254B split 1/2` + `6B split 2/2` and all three Reticulous stations reassemble it; `lxmf send <a Sergeyculum lxmf.delivery> <180 chars>` at a Reticulous station is 291 B on the wire and goes the same way. Over 500 B Reticulous LXMF opens a link and offers a resource instead |
-| CSMA under contention | count overlapping `tx` spans in `record.tsv` by kind pair. Across kinds, overlaps are starts within one preamble of each other, which no listener can see, plus a frame that starts straight after a station's own transmission ends |
+| CSMA under contention | count overlapping `tx` spans in `record.tsv` by kind pair. Across kinds, overlaps are starts within a few symbols of each other, before a listener's demodulator has found the other preamble, plus a frame that starts straight after a station's own transmission ends |
 | the hidden terminal | `rncfg announce <kiss>` at both Sergeyculum stations in one instant: alpha keeps sergey1's frame, charlie keeps sergey2's, bravo in the middle keeps neither |
 
 Three things the two stacks do differently, all visible in the record:
