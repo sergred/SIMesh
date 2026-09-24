@@ -616,6 +616,70 @@ def test_a_receiver_that_hears_only_one_of_two_colliding_frames_keeps_it(ether):
     assert end["verdict"] == "clean"
 
 
+def test_a_frame_that_finds_its_receiver_idle_takes_it(ether):
+    sender, receiver = ether(1, 0), ether(2, NEAR_M)
+    sender.hello()
+    receiver.hello()
+    receiver.state("RX")
+    time.sleep(0.1)
+
+    sender.tx(121)
+    assert receiver.expect("rx_begin")["takes"] is True
+
+
+def collide_at(ether, a_m, c_m):
+    """b at the origin follows a's frame when c's lands on it; both rx_begins."""
+    a, b, c = ether(1, a_m), ether(2, 0), ether(3, c_m)
+    for station in (a, b, c):
+        station.hello()
+        station.state("RX")
+    time.sleep(0.1)
+
+    a.tx(131, payload=b"from a")
+    first = b.expect("rx_begin")
+    time.sleep(FRAME_US / 4e6)          # squarely inside a's frame
+    c.tx(132, payload=b"from c")
+    return first, b.expect("rx_begin")
+
+
+def test_a_later_frame_takes_a_busy_receiver_past_the_capture_margin(ether):
+    """Half the distance is 8 dB at the default exponent: over the margin."""
+    first, second = collide_at(ether, 2 * FAR_M, -FAR_M)
+    assert first["takes"] is True
+    assert second["takes"] is True
+
+
+def test_a_later_frame_under_the_capture_margin_does_not_take_it(ether):
+    """1.4 km against 2 km is 4 dB at the default exponent: under it."""
+    first, second = collide_at(ether, 2 * FAR_M, -1.4 * FAR_M)
+    assert first["takes"] is True
+    assert second["takes"] is False
+
+
+def test_the_receiver_is_told_the_scenarios_margin_not_a_fixed_one(ether):
+    """The same 4 dB takes the receiver when the scenario's margin is 3 dB."""
+    ether.physics = {"capture_db": 3}
+    first, second = collide_at(ether, 2 * FAR_M, -1.4 * FAR_M)
+    assert second["takes"] is True
+
+
+def test_a_receiver_that_leaves_rx_lets_go_of_the_frame_it_followed(ether):
+    a, b, c = ether(1, 2 * FAR_M), ether(2, 0), ether(3, -1.4 * FAR_M)
+    for station in (a, b, c):
+        station.hello()
+        station.state("RX")
+    time.sleep(0.1)
+
+    a.tx(141, payload=b"from a")
+    assert b.expect("rx_begin")["takes"] is True
+    b.state("STDBY_RC")
+    time.sleep(0.02)
+    b.state("RX")
+    time.sleep(0.02)
+    c.tx(142, payload=b"from c")
+    assert b.expect("rx_begin")["takes"] is True
+
+
 def test_a_station_that_was_never_placed_hears_nothing(ether):
     """Position is the whole of a station's presence in the medium: one that
     has none is not on the plane, and no distance to it exists."""

@@ -129,7 +129,7 @@ Positions are not on it in either direction: a station never learns where it is.
 | Message | Says |
 |---|---|
 | `welcome` | joined; the ether's clock origin, its seed, and that it runs in real time |
-| `rx_begin` | a frame is arriving: when its preamble, header and end fall, and how strongly; `"cad": true` when the station is in CAD and no end will follow |
+| `rx_begin` | a frame is arriving: when its preamble, header and end fall, and how strongly; `"cad": true` when the station is in CAD and no end will follow; otherwise `takes`, whether the frame takes the receiver from one it was already following |
 | `rx_end` | that frame is over: the verdict, the payload, RSSI and SNR |
 
 A station's `t` fields are its own clock and mean something only against each

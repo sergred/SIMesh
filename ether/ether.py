@@ -280,6 +280,7 @@ class Ether(asyncio.DatagramProtocol):
         self.places = {}            # sid -> Placement, whether or not it has joined
         self.obstructions = {}      # frozenset({a, b}) -> dB
         self.frames = []            # frames still in flight or just ended
+        self.locks = {}             # (sid, slot) -> (frame, level): what a receiver follows
         self.next_eid = 0           # the ether's own frame numbering
         self.seed = seed if seed is not None else random.randrange(1 << 31)
         self.on_tx = None           # (sid, eid, freq, t_start, t_end)
@@ -473,6 +474,8 @@ class Ether(asyncio.DatagramProtocol):
         station = self.station_for(sid, addr)
         slot = msg.get("slot", 0)
         station.states[slot] = msg
+        if msg.get("mode") != "RX":
+            self.locks.pop((sid, slot), None)   # a receiver that leaves RX lets go
         log("station %d slot %s %s freq=%s bw=%s sf=%s sync=%s" % (
             sid, slot, msg.get("mode"), msg.get("freq"), msg.get("bw"),
             msg.get("sf"), msg.get("sync")))
@@ -524,6 +527,7 @@ class Ether(asyncio.DatagramProtocol):
                     # and the map draws no reception for it.
                     self.send(rsid, dict(begin, cad=True))
                     continue
+                begin["takes"] = self.takes_receiver(rsid, slot, frame, level, start)
                 frame.receivers.append((rsid, slot, level))
                 self.send(rsid, begin)
                 self.loop.call_later(span / 1_000_000.0,
@@ -538,6 +542,23 @@ class Ether(asyncio.DatagramProtocol):
         """True when a receiver's stated radio can hear this transmission."""
         return (all(state.get(k) == tx.get(k) for k in MATCH_KEYS)
                 and same_carrier(state.get("freq"), tx.get("freq"), state.get("bw")))
+
+    def takes_receiver(self, rsid, slot, frame, level, now):
+        """Whether this frame takes a receiver, which then follows it.
+
+        A demodulator follows one frame at a time. A receiver following nothing
+        takes the frame that reaches it; one already following a frame keeps it
+        unless the new frame leads it there by the capture margin. The ether
+        says so in the `rx_begin`, because it is the ether that rules on which
+        of the two survives: a chip deciding at a margin of its own would hand
+        up a frame the medium had spoiled, or drop one it had kept.
+        """
+        held = self.locks.get((rsid, slot))
+        if (held is not None and held[0].end_us > now
+                and level - held[1] < self.physics.capture_db):
+            return False
+        self.locks[(rsid, slot)] = (frame, level)
+        return True
 
     # ---- delivery -------------------------------------------------------
 
