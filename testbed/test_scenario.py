@@ -96,6 +96,26 @@ def test_the_page_sets_shadowing_and_the_seed_stays_a_whole_number(tmp_path):
     assert "unknown" not in sc.physics
 
 
+def test_the_capture_model_is_written_only_when_it_is_the_bench(tmp_path):
+    data = scenario_module.read(write(tmp_path, MIXED))
+    assert "capture_model" not in scenario_module.dump(data)
+
+    data["physics"]["capture_model"] = "bench"
+    text = scenario_module.dump(data)
+    assert 'capture_model: "bench"' in text
+    assert scenario_module.read(write(tmp_path, text, "again.yaml")) == data
+
+
+def test_a_capture_model_nobody_knows_is_refused(tmp_path):
+    data = scenario_module.read(write(tmp_path, MIXED))
+    sc = scenario_module.Scenario("mixed", data, run_dir=str(tmp_path / "run"))
+    with pytest.raises(scenario_module.ScenarioError):
+        sc.set_physics({"capture_model": "optimistic"})
+    text = MIXED.replace("setup:\n  - \"hostname", 'physics: { capture_model: "guess" }\nsetup:\n  - "hostname', 1)
+    with pytest.raises(scenario_module.ScenarioError):
+        scenario_module.read(write(tmp_path, text, "bad.yaml"))
+
+
 def test_scenario_setup_goes_to_the_first_kind_only(tmp_path):
     data = scenario_module.read(write(tmp_path, MIXED))
     sc = scenario_module.Scenario("mixed", data, run_dir=str(tmp_path / "run"))

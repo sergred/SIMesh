@@ -167,6 +167,7 @@ class Bench:
         self.places = {}            # sid -> (x_m, y_m, gain_db)
         self.walls = []             # (sid, sid, dB)
         self.physics = {}           # the scenario's `physics:`, when a test states it
+        self.seed = None            # the ether's --seed, when a test fixes it
 
     def place(self, sid, x_m, y_m=0.0, gain_db=0.0):
         assert self.proc is None, "the ether is already running"
@@ -211,6 +212,8 @@ class Bench:
                 "--record", str(self.record)]
         if self.places:
             argv += ["--scenario", str(self.write_scenario())]
+        if self.seed is not None:
+            argv += ["--seed", str(self.seed)]
         self.proc = subprocess.Popen(argv, stdout=subprocess.DEVNULL,
                                      stderr=subprocess.PIPE, text=True)
         lines = queue.Queue()
@@ -678,6 +681,95 @@ def test_a_receiver_that_leaves_rx_lets_go_of_the_frame_it_followed(ether):
     time.sleep(0.02)
     c.tx(142, payload=b"from c")
     assert b.expect("rx_begin")["takes"] is True
+
+
+def outcomes(lead, locked=False, pairs=3000):
+    """bench_outcome over many pairs of frames at one receiver."""
+    return [ether_module.bench_outcome(11, 2 * n + 1, 2 * n + 2, 5, lead, locked)
+            for n in range(pairs)]
+
+
+def test_bench_equals_are_both_lost_one_time_in_four_and_never_both_kept():
+    seen = outcomes(0.5)
+    assert (True, True) not in seen
+    both_lost = seen.count((False, False)) / len(seen)
+    assert both_lost == pytest.approx(9 / 39, abs=0.03)
+    first = seen.count((True, False)) / (len(seen) - seen.count((False, False)))
+    assert first == pytest.approx(0.5, abs=0.04)
+
+
+def test_bench_keeps_the_stronger_nine_times_in_ten_at_2_db_and_never_the_weaker():
+    seen = outcomes(2.0)
+    assert all(second is False for _, second in seen)
+    kept = sum(first for first, _ in seen) / len(seen)
+    assert kept == pytest.approx(119 / 136, abs=0.025)
+    assert set(outcomes(-2.0)) <= {(False, True), (False, False)}
+
+
+def test_bench_keeps_the_stronger_every_time_from_6_1_db():
+    assert set(outcomes(6.1, pairs=500)) == {(True, False)}
+    assert set(outcomes(-7.0, pairs=500)) == {(False, True)}
+
+
+def test_bench_a_late_frame_is_never_received_and_a_stronger_one_spoils_both():
+    assert set(outcomes(-2.0, locked=True, pairs=500)) == {(False, False)}
+    assert set(outcomes(7.0, locked=True, pairs=500)) == {(True, False)}
+    assert all(second is False for _, second in outcomes(0.0, locked=True))
+
+
+def test_bench_capture_keeps_a_frame_8_db_up_as_the_margin_does(ether):
+    """The hidden terminal from before, judged as the bench saw it."""
+    ether.physics = {"capture_model": "bench"}
+    ether.obstruct(1, 3, WALL_DB)
+    a, b, c = ether(1, 0), ether(2, FAR_M), ether(3, 3 * FAR_M)
+    for station in (a, b, c):
+        station.hello()
+        station.state("RX")
+    time.sleep(0.1)
+
+    a.tx(151, payload=b"from a")
+    c.tx(152, payload=b"from c")
+    ends = b.ends(2)
+    assert ends[b"from a"]["verdict"] == "clean"
+    assert ends[b"from c"]["verdict"] == "crc"
+
+
+def test_bench_capture_a_stronger_frame_after_the_preamble_spoils_both(ether):
+    """b follows a's frame; c's lands after its preamble, 8 dB louder."""
+    ether.physics = {"capture_model": "bench"}
+    a, b, c = ether(1, 2 * FAR_M), ether(2, 0), ether(3, -FAR_M)
+    for station in (a, b, c):
+        station.hello()
+        station.state("RX")
+    time.sleep(0.1)
+
+    a.tx(161, payload=b"from a")
+    assert b.expect("rx_begin")["takes"] is True
+    time.sleep(FRAME_US / 4e6)          # past a's preamble, a tenth of the frame
+    c.tx(162, payload=b"from c")
+    assert b.expect("rx_begin")["takes"] is False
+    ends = b.ends(2)
+    assert ends[b"from a"]["verdict"] == "crc"
+    assert ends[b"from c"]["verdict"] == "crc"
+
+
+def test_bench_capture_a_weaker_frame_after_the_preamble_leaves_the_first(ether):
+    """b follows a's frame; c's lands after its preamble, 8 dB quieter."""
+    ether.physics = {"capture_model": "bench"}
+    a, b, c = ether(1, FAR_M), ether(2, 0), ether(3, -2 * FAR_M)
+    for station in (a, b, c):
+        station.hello()
+        station.state("RX")
+    time.sleep(0.1)
+
+    a.tx(171, payload=b"from a")
+    b.expect("rx_begin")
+    time.sleep(FRAME_US / 4e6)
+    c.tx(172, payload=b"from c")
+    assert b.expect("rx_begin")["takes"] is False
+    ends = b.ends(2)
+    assert ends[b"from a"]["verdict"] == "clean"
+    assert ends[b"from c"]["verdict"] == "crc"
 
 
 def test_a_station_that_was_never_placed_hears_nothing(ether):

@@ -394,7 +394,8 @@ its own on top, so two pairs at one distance need not hear each other equally;
 
 Two frames that share a carrier and any instant of air interfere, and each
 receiver rules on them for itself: a frame survives where it leads everything
-else that station could hear by the capture margin.
+else that station could hear by the capture margin, or, with `capture_model:
+bench`, as a bench measured it.
 [`ether/README.md`](ether/README.md) has the whole of what the medium
 decides.
 
