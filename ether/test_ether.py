@@ -166,6 +166,7 @@ class Bench:
         self.stations = []
         self.places = {}            # sid -> (x_m, y_m, gain_db)
         self.walls = []             # (sid, sid, dB)
+        self.physics = {}           # the scenario's `physics:`, when a test states it
 
     def place(self, sid, x_m, y_m=0.0, gain_db=0.0):
         assert self.proc is None, "the ether is already running"
@@ -188,7 +189,11 @@ class Bench:
                          % (sid, sid, lat, lon, gain_db))
         walls = ["  - { between: [n%d, n%d], db: %g }" % (a, b, db)
                  for a, b, db in self.walls]
-        text = "origin: [0.0, 0.0]\nnodes:\n" + "\n".join(nodes) + "\n"
+        text = "origin: [0.0, 0.0]\n"
+        if self.physics:
+            text += "physics: { %s }\n" % ", ".join(
+                "%s: %s" % (key, value) for key, value in self.physics.items())
+        text += "nodes:\n" + "\n".join(nodes) + "\n"
         if walls:
             text += "obstructions:\n" + "\n".join(walls) + "\n"
         path = self.tmp_path / "scenario.yaml"
@@ -333,6 +338,36 @@ def test_two_stations_at_one_point_are_held_a_metre_apart(ether):
 
     sender.tx(1)
     assert receiver.expect("rx_begin")["level"] == round(expected_level(1.0))
+
+
+def test_shadowing_is_one_draw_per_pair_the_same_both_ways_and_every_time():
+    draw = ether_module.shadowing_unit
+    assert draw(3, 1, 2) == draw(3, 2, 1)
+    assert draw(3, 1, 2) == draw(3, 1, 2)
+    assert draw(3, 1, 2) != draw(3, 1, 3)
+    assert draw(3, 1, 2) != draw(4, 1, 2)
+
+
+def test_shadowing_draws_spread_like_a_standard_normal():
+    draws = [ether_module.shadowing_unit(7, a, b)
+             for a in range(1, 41) for b in range(a + 1, 41)]
+    mean = sum(draws) / len(draws)
+    spread = math.sqrt(sum((d - mean) ** 2 for d in draws) / (len(draws) - 1))
+    assert abs(mean) < 0.12
+    assert spread == pytest.approx(1.0, abs=0.08)
+
+
+def test_shadowing_moves_a_link_by_its_pairs_draw_times_the_spread(ether):
+    ether.physics = {"shadowing_db": 7, "shadowing_seed": 3}
+    sender, receiver = ether(1, 0), ether(2, FAR_M)
+    sender.hello()
+    receiver.hello()
+    receiver.state("RX")
+    time.sleep(0.1)
+
+    sender.tx(1)
+    shadow = 7 * ether_module.shadowing_unit(3, 1, 2)
+    assert receiver.expect("rx_begin")["level"] == round(expected_level(FAR_M) - shadow)
 
 
 def test_the_sender_is_not_a_receiver_and_others_must_match(ether):

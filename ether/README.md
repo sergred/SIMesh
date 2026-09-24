@@ -22,7 +22,7 @@ position in metres and an antenna gain; the level a frame arrives at is
 
 ```
 L = P_tx + G_tx + G_rx − PL(d)
-PL(d) = FSPL(1 m, f) + 10·n·log10(d) + obstruction(tx, rx)
+PL(d) = FSPL(1 m, f) + 10·n·log10(d) + X(tx, rx) + obstruction(tx, rx)
 ```
 
 - `FSPL(1 m, f)` is the free-space loss over the first metre at the frame's own
@@ -32,6 +32,11 @@ PL(d) = FSPL(1 m, f) + 10·n·log10(d) + obstruction(tx, rx)
   down on a metre and two kilometres 8.1 dB down on one.
 - An **obstruction** is a constant in dB between one pair, in both directions.
   It is how two stations within reach of each other are put out of it.
+- `X(tx, rx)` is the pair's **shadowing**: a draw from a normal distribution
+  whose spread is the scenario's `shadowing_db`, one per pair, the same in both
+  directions and for the whole run, and fixed by `shadowing_seed`. At the
+  default spread of 0 there is none, and every pair at one distance hears the
+  other at one level.
 - Two stations at the same point are held one metre apart, so nothing divides
   by nothing.
 
@@ -68,8 +73,9 @@ which is what makes a hidden terminal behave like one: two stations that cannot
 hear each other do not defer to each other either.
 
 Absent at this depth: fading, the CRC band just above the sensitivity threshold,
-noise that varies with what else is in the air, and a referee. A level is computed once from the geometry and does not change from
-one frame to the next.
+noise that varies with what else is in the air, and a referee. A level is
+computed once, from the geometry and the pair's shadowing, and does not change
+from one frame to the next.
 
 ## Positions
 
@@ -78,7 +84,8 @@ Whatever drives a run places the stations:
 ```python
 ether.place(sid, x_m, y_m, gain_db)     # metres on a flat plane
 ether.obstruct(a, b, db)                # extra loss between one pair
-ether.physics = Physics(exponent, noise_figure_db, capture_db)
+ether.physics = Physics(exponent, noise_figure_db, capture_db,
+                        shadowing_db, shadowing_seed)
 ```
 
 Run alone, `--scenario` takes them from a scenario file — a directory or a
