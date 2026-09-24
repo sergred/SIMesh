@@ -389,6 +389,39 @@ def test_a_louder_frame_takes_the_receiver_only_past_the_capture_margin(chip):
     assert chip.read_buffer(start, length) == b"the loud one"
 
 
+def test_the_ether_decides_whether_a_frame_takes_a_busy_receiver(chip):
+    chip.configure()
+    chip.write(SET_RX, 0xFF, 0xFF, 0xFF)
+    settle()
+
+    # Only 3 dB louder, but the ether says it takes the receiver: it does.
+    chip.ether.rx_begin(211, -90, 10_000, 20_000, 300_000)
+    settle(0.02)
+    chip.ether.rx_begin(212, -87, 10_000, 20_000, 300_000, takes=True)
+    settle(0.05)
+    chip.ether.rx_end(211, b"the first")
+    settle(0.1)
+    assert chip.irq() & RX_DONE == 0
+    chip.ether.rx_end(212, b"the second")
+    chip.wait_irq(RX_DONE)
+    length, start = chip.read(GET_RX_BUF_STATUS, 2)
+    assert chip.read_buffer(start, length) == b"the second"
+
+    # 7 dB louder, but the ether says it does not: the receiver stays.
+    chip.clear_irq()
+    chip.ether.rx_begin(213, -90, 10_000, 20_000, 300_000)
+    settle(0.02)
+    chip.ether.rx_begin(214, -83, 10_000, 20_000, 300_000, takes=False)
+    settle(0.05)
+    chip.ether.rx_end(214, b"the loud one")
+    settle(0.1)
+    assert chip.irq() & RX_DONE == 0
+    chip.ether.rx_end(213, b"the quiet one")
+    chip.wait_irq(RX_DONE)
+    length, start = chip.read(GET_RX_BUF_STATUS, 2)
+    assert chip.read_buffer(start, length) == b"the quiet one"
+
+
 def test_standby_during_a_reception_drops_it(chip):
     chip.configure()
     chip.write(SET_RX, 0xFF, 0xFF, 0xFF)

@@ -154,6 +154,20 @@ when it was delivered. A station can be dragged across the map while two frames
 are in the air, and the answer that matters is where it was when the reception
 ended.
 
+## Which frame a receiver follows
+
+A demodulator follows one frame at a time, so when a second frame reaches a
+receiver already following one, the chip needs to know whether it takes the
+receiver or goes unheard. That is the question of which of the two survives,
+and the ether answers it with the same rule: `rx_begin` carries `takes`. A
+receiver following nothing takes the frame that reaches it; one following a
+frame keeps it unless the new frame leads it there by the capture margin, the
+margin the verdict applies. The ether keeps its own note of what each receiver
+follows, from the `rx_begin`s it sent and the states it was told, and a
+receiver that leaves `RX` lets go. A chip that decided for itself at a margin of
+its own would hand up a frame the medium had spoiled, or drop one it had kept,
+whenever a scenario's margin was not the chip's.
+
 ## A frame's two names
 
 A station numbers its own transmissions and knows nothing of anyone else's, so

@@ -379,11 +379,13 @@ reads them:
   in the testbed impossible, and it would do it silently.
 - **A receiver follows one frame at a time.** The medium reports every frame
   that reaches the antenna; the chip locks onto the first, and a frame that
-  starts while it is demodulating is not received at all unless it leads the
-  one in progress by the capture margin, in which case the receiver drops
-  what it had and takes the louder one. Without that the driver would be
-  handed whichever frame ended last, and the medium's verdict — which says
-  one of the two survived — would mean nothing above the bus.
+  starts while it is demodulating is not received at all unless it takes the
+  receiver, in which case the receiver drops what it had and follows the new
+  one. The ether says which in the `rx_begin` (`takes`), at the scenario's
+  capture margin; an ether that does not say is taken to mean the model's own
+  6 dB. Without that the driver would be handed whichever frame ended last,
+  and the medium's verdict — which says one of the two survived — would mean
+  nothing above the bus.
 - **Channel activity detection answers.** `SetCad` runs for the symbols
   `SetCadParams` named, then raises `CAD_DONE`, with `CAD_DETECTED` when a
   frame this antenna has been told of is still on the air. A driver whose

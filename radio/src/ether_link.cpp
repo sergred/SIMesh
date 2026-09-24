@@ -62,6 +62,7 @@ void handleMessage(const char* text, size_t len)
             f.tHdr     = msg.num("t_hdr", 0);
             f.tEnd     = msg.num("t_end", 0);
             f.levelDbm = (int)msg.num("level", kNoiseFloorDbm);
+            f.takes    = msg.has("takes") ? (msg.num("takes", 0) ? 1 : 0) : -1;
             modelRxBegin(chip, f);
         }
     } else if (type == "rx_end") {
