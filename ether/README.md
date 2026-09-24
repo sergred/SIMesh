@@ -37,6 +37,10 @@ PL(d) = FSPL(1 m, f) + 10·n·log10(d) + X(tx, rx) + obstruction(tx, rx)
   directions and for the whole run, and fixed by `shadowing_seed`. At the
   default spread of 0 there is none, and every pair at one distance hears the
   other at one level.
+- A **link** states one pair's path loss outright, in both directions: `PL`
+  is then the stated figure, plus any obstruction, whatever the distance and
+  the carrier. It is how a measured link, or one from a propagation model that
+  knows the ground between, goes into a run.
 - Two stations at the same point are held one metre apart, so nothing divides
   by nothing.
 
@@ -94,6 +98,7 @@ Whatever drives a run places the stations:
 ```python
 ether.place(sid, x_m, y_m, gain_db)     # metres on a flat plane
 ether.obstruct(a, b, db)                # extra loss between one pair
+ether.link(a, b, loss_db)               # one pair's path loss, stated outright
 ether.physics = Physics(exponent, noise_figure_db, capture_db,
                         shadowing_db, shadowing_seed)
 ```

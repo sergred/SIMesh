@@ -390,7 +390,14 @@ spreading factor really does reach further. An **obstruction** is a per-pair con
 stations near each other are put out of each other's reach. **Shadowing**
 (`shadowing_db` in `physics:`, 0 by default) gives every pair a fixed draw of
 its own on top, so two pairs at one distance need not hear each other equally;
-`shadowing_seed` picks the draw.
+`shadowing_seed` picks the draw. A **link** states one pair's path loss
+outright, measured or from a propagation model such as ITU-R P.1812, and
+stands in for that pair's distance and shadowing:
+
+```yaml
+links:
+  - { between: [alpha, charlie], loss_db: 131.5 }
+```
 
 Two frames that share a carrier and any instant of air interfere, and each
 receiver rules on them for itself: a frame survives where it leads everything

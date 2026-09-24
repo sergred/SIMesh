@@ -78,6 +78,14 @@ frames is the louder one, and by how much. Computing them rather than reading
 them buys the thing a testbed most wants — that moving a station changes what it
 can hear, and that the change is the same change a person would reason about.
 
+A **link** is the one exception, and a deliberate one: a pair whose loss was
+measured, or computed by a propagation model that knows the terrain and the
+buildings between them, can have that figure stated outright. It stands in for
+the distance and the shadowing of that pair only, in both directions and at
+every carrier, and an obstruction still adds to it. A station that is moved
+keeps its links, because a link is a fact about two stations, not about where
+they stand on the plane.
+
 ## The sensitivity threshold
 
 `N = −174 + 10·log10(BW) + NF`, and a frame that does not clear the SNR its

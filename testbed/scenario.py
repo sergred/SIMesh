@@ -167,7 +167,8 @@ def blank():
             "kinds": copy.deepcopy(DEFAULT_KINDS),
             "setup": list(DEFAULT_SETUP),
             "nodes": {},
-            "obstructions": []}
+            "obstructions": [],
+            "links": []}
 
 
 def first_kind(data):
@@ -266,6 +267,12 @@ def dump(data):
     out += ["  - { between: [%s, %s], db: %s }"
             % (wall["between"][0], wall["between"][1], scalar(wall.get("db", 0)))
             for wall in walls]
+    links = data.get("links") or []
+    if links:
+        out.append("links:")
+        out += ["  - { between: [%s, %s], loss_db: %s }"
+                % (link["between"][0], link["between"][1], scalar(link["loss_db"]))
+                for link in links]
     return "\n".join(out) + "\n"
 
 
@@ -298,6 +305,12 @@ def read(path):
     filled["obstructions"] = [
         {"between": list(wall["between"])[:2], "db": float(wall.get("db", 0))}
         for wall in (data.get("obstructions") or [])]
+    try:
+        filled["links"] = [
+            {"between": list(link["between"])[:2], "loss_db": float(link["loss_db"])}
+            for link in (data.get("links") or [])]
+    except (KeyError, TypeError, ValueError) as err:
+        raise ScenarioError("%s: a link is { between: [a, b], loss_db: <dB> }" % path) from err
     filled["nodes"] = {}
     ids = {}
     for name, node in (data.get("nodes") or {}).items():
@@ -413,6 +426,10 @@ class Scenario:
         return self.data["obstructions"]
 
     @property
+    def links(self):
+        return self.data.setdefault("links", [])
+
+    @property
     def kinds(self):
         """Kind name -> its spec, in the file's order; the first is the default."""
         return self.data["kinds"]
@@ -480,6 +497,8 @@ class Scenario:
         del self.nodes[name]
         self.data["obstructions"] = [
             wall for wall in self.obstructions if name not in wall["between"]]
+        self.data["links"] = [
+            link for link in self.links if name not in link["between"]]
         shutil.rmtree(self.node_dir(name), ignore_errors=True)
         self.dirty = True
 
@@ -553,7 +572,8 @@ class Scenario:
         return {"name": self.name, "dirty": self.dirty,
                 "origin": list(self.origin), "physics": dict(self.physics),
                 "setup": list(self.setup), "kinds": list(self.kinds),
-                "obstructions": [dict(w) for w in self.obstructions]}
+                "obstructions": [dict(w) for w in self.obstructions],
+                "links": [dict(link) for link in self.links]}
 
 
 # ---- loading -------------------------------------------------------------

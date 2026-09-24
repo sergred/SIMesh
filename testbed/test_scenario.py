@@ -116,6 +116,30 @@ def test_a_capture_model_nobody_knows_is_refused(tmp_path):
         scenario_module.read(write(tmp_path, text, "bad.yaml"))
 
 
+def test_links_are_written_only_when_there_are_some_and_round_trip(tmp_path):
+    data = scenario_module.read(write(tmp_path, MIXED))
+    assert "links" not in scenario_module.dump(data)
+
+    data["links"] = [{"between": ["alpha", "sergey"], "loss_db": 118.5}]
+    text = scenario_module.dump(data)
+    assert "  - { between: [alpha, sergey], loss_db: 118.5 }" in text
+    assert scenario_module.read(write(tmp_path, text, "again.yaml")) == data
+
+
+def test_removing_a_node_drops_its_links(tmp_path):
+    text = MIXED + "links:\n  - { between: [alpha, sergey], loss_db: 118.5 }\n"
+    data = scenario_module.read(write(tmp_path, text))
+    sc = scenario_module.Scenario("mixed", data, run_dir=str(tmp_path / "run"))
+    sc.remove_node("sergey")
+    assert sc.links == []
+
+
+def test_a_link_without_a_loss_is_refused(tmp_path):
+    text = MIXED + "links:\n  - { between: [alpha, sergey] }\n"
+    with pytest.raises(scenario_module.ScenarioError):
+        scenario_module.read(write(tmp_path, text))
+
+
 def test_scenario_setup_goes_to_the_first_kind_only(tmp_path):
     data = scenario_module.read(write(tmp_path, MIXED))
     sc = scenario_module.Scenario("mixed", data, run_dir=str(tmp_path / "run"))

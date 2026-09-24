@@ -165,6 +165,11 @@ class Simd:
             nodes = self.scenario.nodes
             if a in nodes and b in nodes:
                 self.ether.obstruct(nodes[a]["id"], nodes[b]["id"], wall["db"])
+        for link in self.scenario.links:
+            a, b = link["between"]
+            nodes = self.scenario.nodes
+            if a in nodes and b in nodes:
+                self.ether.link(nodes[a]["id"], nodes[b]["id"], link["loss_db"])
 
     def ether_tx(self, sid, eid, freq, t_start, t_end):
         name = self.name_of(sid)
