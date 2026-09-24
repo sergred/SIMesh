@@ -19,9 +19,12 @@ dB and, when the scenario asks for it, a shadowing draw of its own, and
     L = P_tx + G_tx + G_rx − PL(d)
     PL(d) = FSPL(1 m, f) + 10·n·log10(d) + X(tx, rx) + obstruction(tx, rx)
 
-Positions arrive by direct call — `place()` and `obstruct()` — from whatever
-is driving the run; the UDP wire to the stations never mentions them, and a
-station never learns where it is.
+unless the pair has a link: a path loss stated outright, measured or from a
+propagation model, which stands in for the distance and the shadowing.
+
+Positions arrive by direct call — `place()`, `obstruct()` and `link()` — from
+whatever is driving the run; the UDP wire to the stations never mentions them,
+and a station never learns where it is.
 
 Clocks. A station's `t` fields are its own clock and are meaningful only
 relative to each other inside one message; the ether rebases every frame onto
@@ -360,6 +363,7 @@ class Ether(asyncio.DatagramProtocol):
         self.stations = {}          # sid -> Station
         self.places = {}            # sid -> Placement, whether or not it has joined
         self.obstructions = {}      # frozenset({a, b}) -> dB
+        self.links = {}             # frozenset({a, b}) -> dB: a path loss stated outright
         self.frames = []            # frames still in flight or just ended
         self.locks = {}             # (sid, slot) -> (frame, level): what a receiver follows
         self.next_eid = 0           # the ether's own frame numbering
@@ -390,6 +394,7 @@ class Ether(asyncio.DatagramProtocol):
         self.places.pop(sid, None)
         self.obstructions = {pair: db for pair, db in self.obstructions.items()
                              if sid not in pair}
+        self.links = {pair: db for pair, db in self.links.items() if sid not in pair}
 
     def obstruct(self, a, b, db):
         """Put `db` of extra loss between one pair, in both directions."""
@@ -399,10 +404,19 @@ class Ether(asyncio.DatagramProtocol):
         else:
             self.obstructions.pop(pair, None)
 
+    def link(self, a, b, loss_db):
+        """State one pair's path loss outright, in both directions; None forgets it."""
+        pair = frozenset((a, b))
+        if loss_db is None:
+            self.links.pop(pair, None)
+        else:
+            self.links[pair] = float(loss_db)
+
     def clear(self):
-        """Forget every position and obstruction, for a scenario being replaced."""
+        """Forget every position, obstruction and link, for a scenario being replaced."""
         self.places.clear()
         self.obstructions.clear()
+        self.links.clear()
 
     def distance(self, a, b):
         """Metres between two placed stations, never less than one."""
@@ -416,11 +430,15 @@ class Ether(asyncio.DatagramProtocol):
         d = self.distance(a, b)
         if d is None:
             return None
-        loss = fspl_1m_db(freq_hz) + 10.0 * self.physics.exponent * math.log10(d)
-        if self.physics.shadowing_db:
-            loss += self.physics.shadowing_db * shadowing_unit(
-                self.physics.shadowing_seed, a, b)
-        return loss + self.obstructions.get(frozenset((a, b)), 0.0)
+        pair = frozenset((a, b))
+        if pair in self.links:
+            loss = self.links[pair]
+        else:
+            loss = fspl_1m_db(freq_hz) + 10.0 * self.physics.exponent * math.log10(d)
+            if self.physics.shadowing_db:
+                loss += self.physics.shadowing_db * shadowing_unit(
+                    self.physics.shadowing_seed, a, b)
+        return loss + self.obstructions.get(pair, 0.0)
 
     def level(self, tx_sid, rx_sid, freq_hz, power_dbm=DEFAULT_POWER_DBM):
         """The level in dBm a frame from `tx_sid` arrives at `rx_sid`, or None."""
@@ -711,7 +729,7 @@ def parse_bind(text):
 
 
 def read_scenario(path):
-    """A scenario file's physics, placements and obstructions, for a run alone.
+    """A scenario file's physics, placements, obstructions and links, for a run alone.
 
     `path` is a `scenario.yaml` or the directory holding one. Positions are
     latitude and longitude in the file and metres by the time they are placed,
@@ -737,10 +755,16 @@ def read_scenario(path):
         a, b = item["between"]
         if a in names and b in names:
             obstructions.append((names[a], names[b], float(item.get("db", 0))))
-    return physics, places, obstructions
+    links = []
+    for item in data.get("links") or []:
+        a, b = item["between"]
+        if a in names and b in names:
+            links.append((names[a], names[b], float(item["loss_db"])))
+    return physics, places, obstructions, links
 
 
-async def serve(bind, record_path, physics, places, obstructions, seed=None):
+async def serve(bind, record_path, physics, places, obstructions, seed=None,
+                links=()):
     loop = asyncio.get_running_loop()
     transport, ether = await loop.create_datagram_endpoint(
         lambda: Ether(record_path, physics, seed), local_addr=bind)
@@ -748,6 +772,8 @@ async def serve(bind, record_path, physics, places, obstructions, seed=None):
         ether.place(sid, x, y, gain)
     for a, b, db in obstructions:
         ether.obstruct(a, b, db)
+    for a, b, loss in links:
+        ether.link(a, b, loss)
     host, port = transport.get_extra_info("sockname")[:2]
     log("ether listening on %s:%d" % (host, port))
     log("recording to %s" % record_path)
@@ -774,12 +800,12 @@ def main(argv=None):
     ap.add_argument("--seed", type=int, default=None,
                     help="the seed of the medium's draws (default: a fresh one)")
     args = ap.parse_args(argv)
-    physics, places, obstructions = Physics(), {}, []
+    physics, places, obstructions, links = Physics(), {}, [], []
     if args.scenario:
-        physics, places, obstructions = read_scenario(args.scenario)
+        physics, places, obstructions, links = read_scenario(args.scenario)
     try:
         asyncio.run(serve(parse_bind(args.bind), args.record,
-                          physics, places, obstructions, args.seed))
+                          physics, places, obstructions, args.seed, links))
     except KeyboardInterrupt:
         log("ether stopping")
     return 0

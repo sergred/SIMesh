@@ -168,6 +168,7 @@ class Bench:
         self.walls = []             # (sid, sid, dB)
         self.physics = {}           # the scenario's `physics:`, when a test states it
         self.seed = None            # the ether's --seed, when a test fixes it
+        self.links = []             # (sid, sid, dB): a pair's path loss, stated
 
     def place(self, sid, x_m, y_m=0.0, gain_db=0.0):
         assert self.proc is None, "the ether is already running"
@@ -176,6 +177,10 @@ class Bench:
     def obstruct(self, a, b, db):
         assert self.proc is None, "the ether is already running"
         self.walls.append((a, b, float(db)))
+
+    def link(self, a, b, loss_db):
+        assert self.proc is None, "the ether is already running"
+        self.links.append((a, b, float(loss_db)))
 
     def write_scenario(self):
         """The placements as a scenario file, which is how the ether reads them.
@@ -197,6 +202,10 @@ class Bench:
         text += "nodes:\n" + "\n".join(nodes) + "\n"
         if walls:
             text += "obstructions:\n" + "\n".join(walls) + "\n"
+        if self.links:
+            text += "links:\n" + "\n".join(
+                "  - { between: [n%d, n%d], loss_db: %g }" % link
+                for link in self.links) + "\n"
         path = self.tmp_path / "scenario.yaml"
         path.write_text(text)
         return path
@@ -770,6 +779,33 @@ def test_bench_capture_a_weaker_frame_after_the_preamble_leaves_the_first(ether)
     ends = b.ends(2)
     assert ends[b"from a"]["verdict"] == "clean"
     assert ends[b"from c"]["verdict"] == "crc"
+
+
+def test_a_link_states_a_pairs_loss_whatever_the_distance(ether):
+    """Ten kilometres apart and heard as the stated 110 dB, not the 139 dB
+    the distance would cost."""
+    ether.link(1, 2, 110)
+    sender, receiver = ether(1, 0), ether(2, 10 * FAR_M)
+    sender.hello()
+    receiver.hello()
+    receiver.state("RX")
+    time.sleep(0.1)
+
+    sender.tx(181)
+    assert receiver.expect("rx_begin")["level"] == POWER_DBM - 110
+
+
+def test_a_link_is_the_same_both_ways_and_an_obstruction_still_adds(ether):
+    ether.link(1, 2, 110)
+    ether.obstruct(1, 2, 10)
+    a, b = ether(1, 0), ether(2, NEAR_M)
+    for station in (a, b):
+        station.hello()
+        station.state("RX")
+    time.sleep(0.1)
+
+    b.tx(191)
+    assert a.expect("rx_begin")["level"] == POWER_DBM - 120
 
 
 def test_a_station_that_was_never_placed_hears_nothing(ether):
