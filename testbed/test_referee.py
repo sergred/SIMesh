@@ -63,6 +63,39 @@ def test_the_referee_names_a_sender_that_talked_over_a_frame_it_was_told_of(tmp_
     assert event["on_air_ms"] == 200.0
 
 
+def test_a_sender_that_began_listening_mid_frame_is_told_late_not_never(tmp_path, capsys):
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "scenario.yaml").write_text(SCENARIO)
+    lines = [
+        # a sends half a second while b is busy; b comes back to RX 100 ms in,
+        # the ether tells it the frame's energy, and b sends 100 ms after that
+        line(1.000, "in", 1, tx(1, 7, 10_000_000, 500_000)),
+        line(1.100, "out", 2, {"type": "energy", "slot": 0, "id": 1, "t0": 100_000,
+                               "t_end": 500_000, "level": -60}),
+        line(1.200, "in", 2, tx(2, 3, 20_000_000, 300_000)),
+    ]
+    (run / "record.tsv").write_text("".join(lines))
+    assert referee.main(["--run", str(run), "--json"]) == 0
+    event = json.loads(capsys.readouterr().out)["carrier_sense"][0]
+    assert (event["sid"], event["over"], event["told"], event["told_late"]) == (2, 1, False, True)
+
+
+def test_the_blind_window_is_four_of_the_frames_own_symbols(tmp_path, capsys):
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "scenario.yaml").write_text(SCENARIO)
+    lines = [
+        # 6 ms into an SF8 frame is under four of its symbols (8.2 ms): blind
+        line(1.000, "in", 1, tx(1, 7, 10_000_000, 500_000, sf=8)),
+        line(1.006, "in", 2, tx(2, 3, 20_000_000, 300_000, sf=8)),
+    ]
+    (run / "record.tsv").write_text("".join(lines))
+    referee.main(["--run", str(run), "--json"])
+    event = json.loads(capsys.readouterr().out)["carrier_sense"][0]
+    assert event["window"] == "blind"
+
+
 def test_the_referee_lists_frames_nobody_was_told_of_by_where_they_were_sent(tmp_path, capsys):
     run = write_run(tmp_path)
     referee.main(["--run", str(run), "--json"])
