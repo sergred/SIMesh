@@ -76,6 +76,26 @@ def test_kinds_round_trip_through_dump_and_read(tmp_path):
     assert again == data
 
 
+def test_shadowing_is_written_only_when_it_says_something(tmp_path):
+    data = scenario_module.read(write(tmp_path, MIXED))
+    assert "shadowing" not in scenario_module.dump(data)
+
+    data["physics"].update(shadowing_db=7, shadowing_seed=3)
+    text = scenario_module.dump(data)
+    assert "shadowing_db: 7" in text and "shadowing_seed: 3" in text
+    assert scenario_module.read(write(tmp_path, text, "again.yaml")) == data
+
+
+def test_the_page_sets_shadowing_and_the_seed_stays_a_whole_number(tmp_path):
+    data = scenario_module.read(write(tmp_path, MIXED))
+    sc = scenario_module.Scenario("mixed", data, run_dir=str(tmp_path / "run"))
+    sc.set_physics({"shadowing_db": "6.5", "shadowing_seed": "4", "unknown": 1})
+    assert sc.physics["shadowing_db"] == 6.5
+    assert sc.physics["shadowing_seed"] == 4
+    assert isinstance(sc.physics["shadowing_seed"], int)
+    assert "unknown" not in sc.physics
+
+
 def test_scenario_setup_goes_to_the_first_kind_only(tmp_path):
     data = scenario_module.read(write(tmp_path, MIXED))
     sc = scenario_module.Scenario("mixed", data, run_dir=str(tmp_path / "run"))

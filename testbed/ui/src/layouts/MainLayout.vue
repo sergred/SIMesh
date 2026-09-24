@@ -181,6 +181,12 @@
           <q-input class="col" v-model.number="physics.capture_db" type="number"
                    outlined dense label="Capture margin (dB)" />
         </q-card-section>
+        <q-card-section class="row q-col-gutter-sm q-pt-none">
+          <q-input class="col" v-model.number="physics.shadowing_db" type="number" step="0.5"
+                   outlined dense label="Shadowing spread (dB)" hint="0 is none" />
+          <q-input class="col" v-model.number="physics.shadowing_seed" type="number" step="1"
+                   outlined dense label="Shadowing seed" />
+        </q-card-section>
         <q-card-section>
           <div class="text-caption text-grey-6 q-mb-sm">
             Setup lines — CLI commands every station of the first kind
@@ -225,7 +231,8 @@ watch(kinds, (list) => {
 }, { immediate: true })
 const waiting = ref(false)
 const setupDraft = ref('')
-const physics = reactive({ exponent: 2.7, noise_figure_db: 6, capture_db: 6 })
+const physics = reactive({ exponent: 2.7, noise_figure_db: 6, capture_db: 6,
+                           shadowing_db: 0, shadowing_seed: 0 })
 
 sim.connect()
 
