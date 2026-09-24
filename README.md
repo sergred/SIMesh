@@ -419,6 +419,20 @@ The lifelines are named from the loaded scenario. `--only <words>` keeps the
 rows whose reading matches, `--record <file>` reads a record kept from an
 earlier run, and `--scenario <path>` names a different one.
 
+`testbed/referee.py` judges the same record, recomputing every level from the
+run's scenario with the ether's own code:
+
+- each station's airtime per sub-band, over the busiest hour, against the
+  budget the band allows (ERC/REC 70-03 Annex 1);
+- every transmission that began while a frame the sender could hear was on the
+  air, and whether the ether had told the sender of that frame, which it does
+  only at a frame's start and only to a station that was listening then;
+- the frames nobody was told of, grouped by the channel they went out on, which
+  is how a station on the wrong channel shows up;
+- the collisions, and whether their senders could hear each other.
+
+`--detail` lists every carrier-sense event, and `--json` gives the whole report.
+
 ## A station's own doors
 
 A `reticulous` station serves its web UI on port 80 of its own loopback

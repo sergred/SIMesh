@@ -195,6 +195,7 @@ medium: the ether's job is the frames, and everything watching is optional.
   frame at another SF. The medium is pessimistic here, and knowingly.
 - **A referee.** The ether does not judge a station's behaviour — it does not
   check that a transmission was preceded by carrier sense, or that a duty cycle
-  was respected. The record is there so something else can.
+  was respected. The record is there so something else can, and
+  `testbed/referee.py` is one such thing.
 - **Virtual time.** It runs on the event loop's real clock. Stations are
   processes in real time and a person is in the loop.
