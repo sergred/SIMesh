@@ -836,6 +836,16 @@ def test_a_standby_within_the_tcxo_start_up_stops_it_and_the_next_one_starts_afr
     pin  # held for the library's sake
 
 
+def test_the_sx1262_takes_its_own_figures_bare_or_qualified_and_no_other_chips(
+        virtual, monkeypatch, capfd):
+    lib, cond = virtual
+    busy_board(monkeypatch, busy_us="lr2021.CalibFE:10500,sx1262.CalibrateImage:6632,SetRx:65")
+    drv = Driver(lib, cond)
+    assert drv.command(CALIBRATE_IMAGE, 0xD7, 0xDB) == 6632
+    assert drv.command(SET_STANDBY, STANDBY_XOSC) == 0
+    assert drv.command(SET_RX, 0xFF, 0xFF, 0xFF) == 65
+    assert "ignored" not in capfd.readouterr().err, "another chip's entry is no error here"
+
 # ---- The LR2021's BUSY: the same figures, its own commands -----------------------
 
 LR2021_LIBRARY = os.path.join(BUILD, "libsimradio-lr2021.so")
@@ -932,12 +942,3 @@ def test_on_an_lr2021_board_the_hosts_time_follows_every_transaction(virtual_lr2
     assert (state["mode"], state["ready_at"]) == ("RX", t + 65 + 29)
 
 
-def test_the_sx1262_takes_its_own_figures_bare_or_qualified_and_no_other_chips(
-        virtual, monkeypatch, capfd):
-    lib, cond = virtual
-    busy_board(monkeypatch, busy_us="lr2021.CalibFE:10500,sx1262.CalibrateImage:6632,SetRx:65")
-    drv = Driver(lib, cond)
-    assert drv.command(CALIBRATE_IMAGE, 0xD7, 0xDB) == 6632
-    assert drv.command(SET_STANDBY, STANDBY_XOSC) == 0
-    assert drv.command(SET_RX, 0xFF, 0xFF, 0xFF) == 65
-    assert "ignored" not in capfd.readouterr().err, "another chip's entry is no error here"
